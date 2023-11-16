@@ -8,12 +8,12 @@
 [![Code coverage][go_code_coverage_img]][go_code_coverage_url]
 [![License][repo_license_img]][repo_license_url]
 
-This is the source code for the paper "Computational Hypergraph Discovery: A Gaussian process framework for connecting the dots". Please see the [companion blog post](https://theobourdais.github.io/) for a gentle introduction to the method and the code.
+This is the source code for the paper ["Computational Hypergraph Discovery: A Gaussian process framework for connecting the dots"][paper_url]. Please see the [companion blog post](https://theobourdais.github.io/) for a gentle introduction to the method and the code.
 
 
 ## Installation 
 
-The code is written in Pythyhon 3.7 and requires the following packages:
+The code is written in Python 3.7 and requires the following packages:
 - matplotlib
 - numpy
 - scipy
@@ -62,7 +62,9 @@ The code gives an easy-to-use interface to manipulate the graph discovery method
 
 ## Manipulating clusters
 
-<!-- Go links -->
+<!-- links -->
+
+[paper_url]: https://example.com
 
 [go_download_url]: https://golang.org/dl/
 [go_run_url]: https://pkg.go.dev/cmd/go#hdr-Compile_and_run_Go_program
