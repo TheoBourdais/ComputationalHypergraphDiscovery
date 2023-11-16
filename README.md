@@ -3,10 +3,11 @@
 
 # Computational Hypergraph Discovery: A Gaussian process framework for connecting the dots
 
-[![Go version][go_version_img]][go_dev_url]
-[![Go report][go_report_img]][go_report_url]
-[![Code coverage][go_code_coverage_img]][go_code_coverage_url]
-[![License][repo_license_img]][repo_license_url]
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.11.4](https://img.shields.io/badge/python-3.11.4-blue.svg)](https://www.python.org/downloads/release/python-3114/)
+[![last commit](https://img.shields.io/github/last-commit/TheoBourdais/ComputationalHypergraphDiscovery.svg)](https://github.com/TheoBourdais/ComputationalHypergraphDiscovery/commits/main)
+[![Cite this repository](https://img.shields.io/badge/Cite%20this%20repository-CITATION.cff-blue.svg)](https://github.com/TheoBourdais/ComputationalHypergraphDiscovery/blob/main/CITATION.cff)
+
 
 This is the source code for the paper ["Computational Hypergraph Discovery: A Gaussian process framework for connecting the dots"][paper_url]. Please see the [companion blog post](https://theobourdais.github.io/) for a gentle introduction to the method and the code.
 
