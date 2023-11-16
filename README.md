@@ -1,4 +1,4 @@
-<img style="width:100%;" alt="CHD logo" src="logo.jpg"></a>
+<img style="width:100%;" alt="CHD logo" src="_images/logo.jpg"></a>
 
 
 # Computational Hypergraph Discovery: A Gaussian process framework for connecting the dots
@@ -9,12 +9,24 @@
 [![Cite this repository](https://img.shields.io/badge/Cite%20this%20repository-CITATION.cff-blue.svg)](https://github.com/TheoBourdais/ComputationalHypergraphDiscovery/blob/main/CITATION.cff)
 
 
-This is the source code for the paper ["Computational Hypergraph Discovery: A Gaussian process framework for connecting the dots"][paper_url]. Please see the [companion blog post](https://theobourdais.github.io/) for a gentle introduction to the method and the code.
+release todo:
+- make repo public
+- add link to paper
+- add link to blog post
+- create citation.cff
+- modify blog post with paper link
+- add sachs data to repo, and modify code in readme and blog post to use it
+- modify gene code to fit new interface
+- modify plot code to see individual activations
+
+This is the source code for the paper ["Computational Hypergraph Discovery: A Gaussian process framework for connecting the dots"][paper_url]. 
+
+Please see the [companion blog post](https://theobourdais.github.io/) for a gentle introduction to the method and the code.
 
 
 ## Installation 
 
-The code is written in Python 3.7 and requires the following packages:
+The code is written in Python 3 and requires the following packages:
 - matplotlib
 - numpy
 - scipy
