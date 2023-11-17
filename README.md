@@ -1,4 +1,4 @@
-<img style="width:100%;" alt="CHD logo" src="images/logo.jpg"></a>
+<img style="width:100%;" alt="CHD logo" src="_images/logo.jpg"></a>
 
 
 # Computational Hypergraph Discovery: A Gaussian process framework for connecting the dots
