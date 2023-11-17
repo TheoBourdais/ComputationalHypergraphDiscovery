@@ -457,8 +457,8 @@ Once the clusters have been defined, you can use the `GraphDiscovery` object as 
 We advise using clusters in a multi-level fashion, as is demonstrated here.
 ```python
 import numpy as np
-from GraphDiscovery import GraphDiscoveryNew
-from GraphDiscovery.Modes import *
+import ComputationalHypergraphDiscovery as CHD
+from ComputationalHypergraphDiscovery.Modes import *
 
 # Load the data
 data = np.loadtxt('data/Sachs.txt', delimiter='\t')
@@ -469,7 +469,7 @@ node_names=np.array(['$Raf$','$Mek$','$Plcg$','$PIP2$','$PIP3$','$Erk$','$Akt$',
 # Define the kernel
 kernel = 0.1*LinearMode() + 0.01*QuadraticMode()
 # Set up CHD
-graph_discovery = GraphDiscoveryNew(data.T,node_names,kernel)
+graph_discovery = CHD.GraphDiscovery(data.T,node_names,kernel)
 # Perform CHD
 graph_discovery.fit()
 graph_discovery.plot_graph()
