@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11.4](https://img.shields.io/badge/python-3.11.4-blue.svg)](https://www.python.org/downloads/release/python-3114/)
 [![last commit](https://img.shields.io/github/last-commit/TheoBourdais/ComputationalHypergraphDiscovery.svg)](https://github.com/TheoBourdais/ComputationalHypergraphDiscovery/commits/main)
-[![Cite this repository](https://img.shields.io/badge/Cite%20this%20repository-CITATION.cff-blue.svg)](https://github.com/TheoBourdais/ComputationalHypergraphDiscovery/blob/main/CITATION.cff)
+[![Cite this repository](https://img.shields.io/badge/Cite%20this%20repository-CITATION.cff-green.svg)](https://github.com/TheoBourdais/ComputationalHypergraphDiscovery/blob/main/CITATION.cff)
 
 
 release todo:
@@ -376,12 +376,51 @@ Severall decisions can be made from this evolution. By default we use `MaxIncrem
     - We look at the highest spike in the noise ratio, and keep the ancestors we had at the moment of this spike.
     - In the example, we see the spike occurs at 2 ancestors, so we keep these 2 ancestors. 
 - **Manual choice**:
+    - Implemented in `ManualModeChooser`.
+    - Choose the number of ancestors manually.
+- **Custom choice**:
+    - Implemented in `CustomModeChooser`.
+    - Choose the number of ancestors based on a custom function.
 
+>**Note** on implementing custom mode chooser:
+> - The `CustomModeChooser` class allows you to put your own logic. You must provide a function `choice`:
+>```python
+>choice(list_of_modes:list, list_of_noises:list, list_of_Zs:list)->int
+>```
+> And the lists give you the evolution of the graph discovery process. If there are 22 ancestors, we remove them one by one, so the 3 lists have length 22. The lists are:
+> - `list_of_modes`: The mode container at each step of the process. It contains all the kernel mode matrices, as well as which ancestors are kept.
+> - `list_of_noises`: The noise ratio at each step of the process.
+> - `list_of_Zs`: The Z_test interval at each step of the process.
+> The choice function must return one of the modes that is in list of modes. Typically, if we want to recover the ancestors at the spike of the noise ratio, we would do:
+> ```python
+> def choice(list_of_modes:list, list_of_noises:list, list_of_Zs:list)->int:
+>    increments = [list_of_noises[i+1]-list_of_noises[i] for i in range(len(list_of_noises)-1)] + [1-list_of_noises[-1]]
+>    index_of_spike = np.argmax(increments)
+>    return list_of_modes[index_of_spike]
+>```
+> Thus, the `choice` function is called in this way:
+>```python
+>class CustomModeChooser(ModeChooser):
+>    def __init__(self, chooser_function):
+>        self.choice_function = chooser_function
+>
+>    def __call__(self, list_of_modes, list_of_noises, list_of_Zs):
+>        res = self.choice_function(list_of_modes, list_of_noises, list_of_Zs)
+>        assert (
+>            res in list_of_modes
+>        ), f"invalid choice of mode from custom function: {res}"
+>        return res
+>```
 
+### Early stopping
 
+The last decision to make is to decide wether to stop the pruning process early to save computation time. To do so, we compute the signal to noise ratio and the `Z_test` after each removal. We haven't implemented any decision logic for this, but you can easily do so by implementing a `CustomEarlyStopping` class.
+This class takes a function `stop` which takes the same arguments as the `CustomModeChooser` class, and returns a boolean. If the function returns `True`, the pruning process stops.
 
 
 ## Manipulating clusters and possible edges
+
+
 
 <!-- links -->
 
