@@ -488,60 +488,12 @@ This code recovers the following graph:
 
 <img style="width:100%;" alt="Resulting graph Sachs example" src="_images/sachs_cluster_plot.png"></a>
 
+### Possible edges
+
+As a practitionner, you may have some knowledge about the data that you wish to use to inform the graph discovery process. For example, you may know that certain nodes cannot be connected. You can specify this information to the algorithm using the `possible_edges` parameter of the `GraphDiscovery` object. This is a directed graph inthe form of a `networkx.DiGraph` object. Graph discovery will ignore all connections that are not in the `possible_edges` graph. An example of use is given in the [chemistry notebook](./examples/ChemistryNew.ipynb). 
+
 
 <!-- links -->
 
 [paper_url]: https://example.com
 [blog_url]: https://example.com
-
-[go_download_url]: https://golang.org/dl/
-[go_run_url]: https://pkg.go.dev/cmd/go#hdr-Compile_and_run_Go_program
-[go_install_url]: https://golang.org/cmd/go/#hdr-Compile_and_install_packages_and_dependencies
-[go_report_url]: https://goreportcard.com/report/github.com/gowebly/gowebly
-[go_dev_url]: https://pkg.go.dev/github.com/gowebly/gowebly
-[go_version_img]: https://img.shields.io/badge/Go-1.21+-00ADD8?style=for-the-badge&logo=go
-[go_code_coverage_url]: https://codecov.io/gh/gowebly/gowebly
-[go_code_coverage_img]: https://img.shields.io/codecov/c/gh/gowebly/gowebly.svg?logo=codecov&style=for-the-badge
-[go_report_img]: https://img.shields.io/badge/Go_report-A+-success?style=for-the-badge&logo=none
-
-<!-- Repository links -->
-
-[repo_url]: https://github.com/gowebly/gowebly
-[repo_issues_url]: https://github.com/gowebly/gowebly/issues
-[repo_pull_request_url]: https://github.com/gowebly/gowebly/pulls
-[repo_releases_url]: https://github.com/gowebly/gowebly/releases
-[repo_license_url]: https://github.com/gowebly/gowebly/blob/main/LICENSE
-[repo_license_img]: https://img.shields.io/badge/license-Apache_2.0-red?style=for-the-badge&logo=none
-[repo_cc_license_url]: https://creativecommons.org/licenses/by-sa/4.0/
-[repo_readme_ru_url]: https://github.com/gowebly/gowebly/blob/main/README_RU.md
-[repo_readme_cn_url]: https://github.com/gowebly/gowebly/blob/main/README_CN.md
-[repo_readme_es_url]: https://github.com/gowebly/gowebly/blob/main/README_ES.md
-[repo_stargazers_url]: https://github.com/gowebly/gowebly/stargazers
-[repo_badge_stargazers_img]: https://user-images.githubusercontent.com/11155743/275514241-8ecdf4bd-c35e-4e28-a937-b0a63aa1dbaf.png
-[repo_default_config_url]: https://github.com/koddr/gowebly/blob/main/internal/attachments/configs/default.yml
-
-<!-- Docs links -->
-
-[docs_url]: https://gowebly.org
-[docs_how_it_works_url]: https://gowebly.org/complete-user-guide/how-does-it-work/index.html
-[docs_installation_url]: https://gowebly.org/complete-user-guide/installation/index.html
-[docs_configuring_url]: https://gowebly.org/complete-user-guide/configuration/index.html
-[docs_create_new_project_url]: https://gowebly.org/complete-user-guide/create-new-project/index.html
-[docs_run_project_url]: https://gowebly.org/complete-user-guide/run-your-project/index.html
-[docs_build_project_url]: https://gowebly.org/complete-user-guide/build-your-project/index.html
-
-<!-- Author links -->
-
-[author_url]: https://github.com/koddr
-
-<!-- Readme links -->
-
-[gowebly_helpers_url]: https://github.com/gowebly/helpers
-[gowebly_youtube_video_url]: https://www.youtube.com/watch?v=qazYscnLku4
-[gowebly_devto_article_url]: https://dev.to/koddr/a-next-generation-cli-tool-for-building-amazing-web-apps-in-go-using-htmx-hyperscript-336d
-[cgapp_url]: https://github.com/create-go-app/cli
-[cgapp_stars_url]: https://github.com/create-go-app/cli/stargazers
-[htmx_url]: https://htmx.org
-[hyperscript_url]: https://hyperscript.org
-[brew_url]: https://brew.sh
-[docker_image_url]: https://hub.docker.com/repository/docker/gowebly/gowebly
