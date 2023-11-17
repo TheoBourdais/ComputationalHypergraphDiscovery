@@ -420,6 +420,73 @@ This class takes a function `stop` which takes the same arguments as the `Custom
 
 ## Manipulating clusters and possible edges
 
+### Clusters
+
+If a set of nodes is highly dependent, it is possible to merge them into a cluster of nodes. This gives greater readability and prevents the graph discovery method from missing other connections. It also lets you perform graph discovery in a hierarchical fashion:
+1. Run CHD once on all nodes
+2. Identify clusters of nodes: if a set of nodes is highly dependent with strong (i.e. low noise) connections, merge them into a cluster of nodes.
+3. Run CHD with clusters
+
+>An example of use of clusters is given in the [Gene notebook](./examples/Gene_graph_discovery.ipynb)
+
+### Cluster definition
+
+#### When creating a `GraphDiscovery` object
+
+When creating a `GraphDiscovery` object, you can specify the `cluster` parameter. It is a list of lists of strings, where each list of strings is a cluster of nodes. For example with the Sachs dataset, we can define the following clusters:
+```python
+clusters=[
+    ['$PKC$','$P38$','$Jnk$'],
+    ['$Erk$','$Akt$','$PKA$'],
+    ['$Raf$','$Mek$'],
+    ['$Plcg$','$PIP2$','$PIP3$']
+]
+graph_discovery = CHD.GraphDiscovery.from_dataframe(df,clusters=clusters)
+```
+
+#### After creating a `GraphDiscovery` object, for second run
+
+If you already have a `GraphDiscovery` object named `graph_discovery` on which you have run the algorithm, you can choose the clusters based on the results and apply them to get a new `GraphDiscovery` object:
+```python
+graph_discovery2=graph_discovery.prepare_new_graph_with_clusters(clusters)
+```
+
+### Using clusters
+Once the clusters have been defined, you can use the `GraphDiscovery` object as usual. It will handle the clustering you specified and will plot the graph showing clusters. 
+We advise using clusters in a multi-level fashion, as is demonstrated here.
+```python
+import numpy as np
+from GraphDiscovery import GraphDiscoveryNew
+from GraphDiscovery.Modes import *
+
+# Load the data
+data = np.loadtxt('data/Sachs.txt', delimiter='\t')
+# Normalize the data
+data = (data - np.mean(data, axis=0)) / np.std(data, axis=0)
+node_names=np.array(['$Raf$','$Mek$','$Plcg$','$PIP2$','$PIP3$','$Erk$','$Akt$','$PKA$','$PKC$','$P38$','$Jnk$'])
+
+# Define the kernel
+kernel = 0.1*LinearMode() + 0.01*QuadraticMode()
+# Set up CHD
+graph_discovery = GraphDiscoveryNew(data.T,node_names,kernel)
+# Perform CHD
+graph_discovery.fit()
+graph_discovery.plot_graph()
+
+# Refine the graph with clusters
+clusters=[
+    ['$PKC$','$P38$','$Jnk$'],
+    ['$Erk$','$Akt$','$PKA$'],
+    ['$Raf$','$Mek$'],
+    ['$Plcg$','$PIP2$','$PIP3$']
+]
+graph_discovery2=graph_discovery.prepare_new_graph_with_clusters(clusters)
+graph_discovery2.fit()
+graph_discovery2.plot_graph()
+```
+This code recovers the following graph:
+
+<img style="width:100%;" alt="Resulting graph Sachs example" src="_images/sachs_cluster_plot.png"></a>
 
 
 <!-- links -->
