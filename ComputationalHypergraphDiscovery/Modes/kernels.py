@@ -300,8 +300,8 @@ class SklearnMode(ModeKernel):
         self._mode_type = mode_type
 
     def __call__(self, X: np.array) -> np.array:
-        res = []
         if self.mode_type in ["individual", "combinatorial"]:
+            res = []
             for col in X:
                 if len(col.shape) > 1:
                     res.append(self.hyperparameters["scipy_kernel"](col))
