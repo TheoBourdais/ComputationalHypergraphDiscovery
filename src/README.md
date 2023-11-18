@@ -6,7 +6,7 @@
 [![GitHub Repo](https://img.shields.io/badge/GitHub-Repo-red)](https://github.com/TheoBourdais/ComputationalHypergraphDiscovery)
 [![Cite this code](https://img.shields.io/badge/Cite%20this%20repository-CITATION.cff-green.svg)](https://github.com/TheoBourdais/ComputationalHypergraphDiscovery/blob/main/CITATION.cff)
 
-This is the source code for the paper ["Computational Hypergraph Discovery: A Gaussian process framework for connecting the dots"][paper_url]. 
+This is the source code for the paper ["Computational Hypergraph Discovery: A Gaussian process framework for connecting the dots"][TO ADD]. 
 
 Please see the [companion blog post](https://theobourdais.github.io/) for a gentle introduction to the method and the code. See the repo [here](https://github.com/TheoBourdais/ComputationalHypergraphDiscovery) for full documentation and examples.
 
