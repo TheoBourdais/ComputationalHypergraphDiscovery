@@ -2,4 +2,3 @@ matplotlib
 networkx
 numpy
 scipy
-scikit-learn
