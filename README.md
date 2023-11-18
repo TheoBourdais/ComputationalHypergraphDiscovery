@@ -35,11 +35,25 @@ The code is written in Python 3 and requires the following packages:
 - scikit-learn
 - networkx
 
-After cloning this repo, you install these packages using pip:
+### Using pip
+
+The code is available on PyPI and can be installed using pip:
+
+```bash
+pip install ComputationalHypergraphDiscovery
+```
+
+### From source
+
+After cloning this repo, you install the required packages using pip:
 ```bash
 pip install -r requirements.txt
 ```
 
+and add the repo to your PYTHONPATH:
+```bash
+export PYTHONPATH=$PYTHONPATH:/path/to/ComputationalHypergraphDiscovery/src
+```
 
 ## Quick start
 
