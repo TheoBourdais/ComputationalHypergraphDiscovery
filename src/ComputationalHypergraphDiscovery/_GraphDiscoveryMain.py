@@ -41,6 +41,7 @@ class GraphDiscovery:
         names,
         mode_kernels=None,
         mode_container=None,
+        normalize=True,
         clusters=None,
         possible_edges=None,
         verbose=True,
@@ -55,6 +56,7 @@ class GraphDiscovery:
         - mode_kernels (ModeKernelList or ModeKernel, default None): the kernels used to compute the modes of the dataset. If None, the default kernels are used (linear, quadratic and gaussian)
         - mode_container (ModeContainer object, default None): alternatively, if the kernel matrices are already computed (for instance when reusing computations from a previous graph), you can provide a ModeContainer object,
             which contains the kernel matrices of the modes of the dataset. You cannot provide both mode_kernels and mode_container.
+        - normalize (boolean, default True): Whether to normalize the data before graph discovery (normalization means centering and scaling to unit variance).
         - clusters (list of lists of strings, default None): if you want to use clusters of node, you can provide a list of lists of strings, where each sublist is a cluster of nodes. If None, no clustering is used.
         - possible_edges (nx.DiGraph object, default None): if you want to restrict the possible edges of the graph, you can provide the possible_edges, where each edge is a possible edge of the graph.
         - verbose (boolean, default True): whether to print information during graph discovery
@@ -63,9 +65,17 @@ class GraphDiscovery:
         - GraphDiscovery object
         """
 
-        self.X = X
+        assert X.shape[0] == len(
+            names
+        ), "X must have as many columns as there are names"
+        assert len(X.shape) == 2, "X must be a 2D array"
+        if normalize:
+            self.X = (X - X.mean(axis=1,keepdims=True)) / X.std(axis=1,keepdims=True)
+        else:
+            self.X = X
         self.print_func = print if verbose else lambda *a, **k: None
         self.names = names
+
         self.name_to_index = {name: index for index, name in enumerate(names)}
         self.possible_edges = possible_edges
         self.G = nx.DiGraph()
@@ -83,22 +93,20 @@ class GraphDiscovery:
                 X, names, mode_kernels, clusters
             )
 
-    def from_dataframe(df, normalize=True, **kwargs):
+    def from_dataframe(df, **kwargs):
         """
         Alternative constructor, that takes a pandas dataframe as input. You can also provide normalize=True to normalize the data before graph discovery, as well as any keyword argument of the constructor.
         See the help of the constructor for details on kwargs
 
         Args:
         - df (pandas.DataFrame): the dataframe containing the data
-        - normalize (boolean, default True): Whether to normalize the data before graph discovery
+
         - **kwargs: Any keyword argument of the constructor
 
         Returns:
         - GraphDiscovery object
         """
         X = df.values
-        if normalize:
-            X = (X - X.mean(axis=0)) / X.std(axis=0)
         return GraphDiscovery(X=X.T, names=df.columns, **kwargs)
 
     def prepare_new_graph_with_clusters(self, clusters):
@@ -307,12 +315,10 @@ class GraphDiscovery:
         )
         plt.show()
 
-        print("add feature to get activations of individual modes")
-
         # adding ancestors to graph and storing activations
 
         activations = list_of_activations[-ancestor_modes.node_number]
-        activations = {key: value for key, value in activations}
+        activations = {"/".join(key): value for key, value in activations}
 
         self.print_func("ancestors after pruning: ", ancestor_modes, "\n")
         for ancestor_name, used in ancestor_modes.used.items():
@@ -361,11 +367,13 @@ class GraphDiscovery:
             energy = -np.dot(ga, active_yb)
             activations = [
                 (
-                    name,
-                    np.dot(active_yb, active_modes.get_K_of_cluster(name) @ active_yb)
+                    cluster,
+                    np.dot(
+                        active_yb, active_modes.get_K_of_cluster(cluster) @ active_yb
+                    )
                     / energy,
                 )
-                for name in active_modes.active_clusters
+                for cluster in active_modes.active_clusters
             ]
             list_of_activations.append(activations)
             minimum_activation_cluster = min(activations, key=lambda x: x[1])[0]
