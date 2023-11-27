@@ -60,7 +60,7 @@ export PYTHONPATH=$PYTHONPATH:/path/to/ComputationalHypergraphDiscovery/src
 Graph discovery takes very little time. The following code runs the method on the example dataset provided in the repo. The dataset is a 2D array of shape (n_samples, n_features) where each row is a sample and each column is a feature. After fitting the model, the graph is stored in the `GraphDiscovery` object, specifically its graph `G` attribute. The graph is a `networkx` object, which can be easily plotted using `.plot_graph()`.
 
 ```python
-import ComputeHypergraphDiscovery as CHD
+import ComputationalHypergraphDiscovery as CHD
 import pandas as pd
 df=pd.read_csv('examples\sachs.csv')
 kernel=CHD.Modes.LinearMode()+CHD.Modes.QuadraticMode()
@@ -100,7 +100,7 @@ Here is an example:
 
 
 ```python
-import ComputeHypergraphDiscovery as CHD
+import ComputationalHypergraphDiscovery as CHD
 import numpy as np
 X=np.random.rand(10,100)
 node_names=[f'node_{i}' for i in range(10)]
@@ -112,7 +112,7 @@ graph_discovery = CHD.GraphDiscovery(X,node_names)
 If you have a Pandas dataframe, you can use the `from_dataframe` method (see the method's docstring for more details):
 
 ```python
-import ComputeHypergraphDiscovery as CHD
+import ComputationalHypergraphDiscovery as CHD
 import pandas as pd
 df=pd.read_csv('examples\sachs.csv')
 graph_discovery = CHD.GraphDiscovery.from_dataframe(df)

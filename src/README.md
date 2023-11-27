@@ -32,7 +32,7 @@ pip install ComputationalHypergraphDiscovery
 Graph discovery takes very little time. The following code runs the method on the example dataset provided in the repo. The dataset is a 2D array of shape (n_samples, n_features) where each row is a sample and each column is a feature. After fitting the model, the graph is stored in the `GraphDiscovery` object, specifically its graph `G` attribute. The graph is a `networkx` object, which can be easily plotted using `.plot_graph()`.
 
 ```python
-import ComputeHypergraphDiscovery as CHD
+import ComputationalHypergraphDiscovery as CHD
 import pandas as pd
 df=pd.read_csv('examples\sachs.csv')
 kernel=CHD.Modes.LinearMode()+CHD.Modes.QuadraticMode()
