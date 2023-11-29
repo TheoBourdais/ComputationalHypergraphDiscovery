@@ -4,7 +4,6 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-yellow.svg)](https://opensource.org/license/apache-2-0/)
 [![Python 3.11.4](https://img.shields.io/badge/python-3.11.4-blue.svg)](https://www.python.org/downloads/release/python-3114/)
 [![GitHub Repo](https://img.shields.io/badge/GitHub-Repo-red)](https://github.com/TheoBourdais/ComputationalHypergraphDiscovery)
-[![Cite this code](https://img.shields.io/badge/Cite%20this%20repository-CITATION.cff-green.svg)](https://github.com/TheoBourdais/ComputationalHypergraphDiscovery/blob/main/CITATION.cff)
 
 This is the source code for the paper ["Computational Hypergraph Discovery: A Gaussian process framework for connecting the dots"](https://arxiv.org/abs/2311.17007). 
 
