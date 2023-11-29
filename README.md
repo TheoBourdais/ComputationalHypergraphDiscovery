@@ -501,5 +501,5 @@ As a practitioner, you may have some knowledge about the data that you wish to u
 
 <!-- links -->
 
-[paper_url]: https://example.com
-[blog_url]: https://example.com
+[paper_url]: https://arxiv.org/abs/2311.17007
+[blog_url]: https://theobourdais.github.io/posts/2023/11/CHD/
