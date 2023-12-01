@@ -70,7 +70,7 @@ class GraphDiscovery:
         ), "X must have as many columns as there are names"
         assert len(X.shape) == 2, "X must be a 2D array"
         if normalize:
-            self.X = (X - X.mean(axis=1,keepdims=True)) / X.std(axis=1,keepdims=True)
+            self.X = (X - X.mean(axis=1, keepdims=True)) / X.std(axis=1, keepdims=True)
         else:
             self.X = X
         self.print_func = print if verbose else lambda *a, **k: None
@@ -90,7 +90,7 @@ class GraphDiscovery:
                     LinearMode() + QuadraticMode() + GaussianMode(l=1.0)
                 )
             self.modes = ModeContainer.from_mode_kernels(
-                X, names, mode_kernels, clusters
+                self.X, names, mode_kernels, clusters
             )
 
     def from_dataframe(df, **kwargs):
@@ -316,7 +316,6 @@ class GraphDiscovery:
         plt.show()
 
         # adding ancestors to graph and storing activations
-
         activations = list_of_activations[-ancestor_modes.node_number]
         activations = {"/".join(key): value for key, value in activations}
 
@@ -403,7 +402,7 @@ class GraphDiscovery:
             )
         # adding last activation after exiting the loop
         if active_modes.node_number == 1:
-            list_of_activations.append([(active_modes.names[0], 1 - noise)])
+            list_of_activations.append([(active_modes.active_clusters[0], 1 - noise)])
         else:
             # same computation as above
             list_of_activations.append(
