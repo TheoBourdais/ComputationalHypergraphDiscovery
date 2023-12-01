@@ -52,3 +52,7 @@ The code gives an easy-to-use interface to manipulate the graph discovery method
 
 
 Full documentation is available [here](https://github.com/TheoBourdais/ComputationalHypergraphDiscovery). 
+
+## Acknowledgements
+
+Copyright 2023 by the California Institute of Technology. ALL RIGHTS RESERVED. United States Government Sponsorship acknowledged. This software may be subject to U.S. export control laws. By accepting this software, the user agrees to comply with all applicable U.S. export laws and regulations. User has the responsibility to obtain export licenses, or other export authority as may be required before exporting such information to foreign countries or providing access to foreign persons.
