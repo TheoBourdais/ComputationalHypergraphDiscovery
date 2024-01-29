@@ -240,6 +240,7 @@ class GraphDiscovery:
     ):
         """
         Finds ancestors of a given node in the graph. This method is called by the fit method.
+        This corresponds algorthm 1 in the paper.
         Has two main components:
             - finding the kernel to use for each node using _compute_kernel_preformances and the kernel_chooser
             - pruning the ancestors of the node using the chosen kernel using _iterative_ancestor_pruner
@@ -263,7 +264,7 @@ class GraphDiscovery:
         # setup
         ga, active_modes = self._prepare_modes_for_ancestor_finding(name)
 
-        # choosing the kernel
+        # finding the kernel (step 3 - 9 in the paper)
         kernel_performance = GraphDiscovery._compute_kernel_preformances(
             gamma=gamma,
             gamma_min=gamma_min,
@@ -273,15 +274,15 @@ class GraphDiscovery:
         )
         which = kernel_chooser(kernel_performance)
 
-        if which is None:
+        if which is None:  # case no ancestors, step 7 in the paper
             self.print_func(f"{name} has no ancestors\n")
             return
         self.print_func(
             f"{name} has ancestors with {which} kernel (n/(s+n)={kernel_performance[which]['noise']:.2f})"
         )
-        active_modes.set_level(which)  # setting the modes at the kernel found above
+        active_modes.set_level(which)
 
-        # pruning ancestors
+        # pruning ancestors (step 10 - 17 in the paper)
 
         (
             list_of_modes,
@@ -304,6 +305,7 @@ class GraphDiscovery:
                 "gamma"
             ],  # If the modes are not interpolatory, we keep the gamma found above
         )
+        # choosing ancestors (step 18 in the paper)
         ancestor_modes = mode_chooser(list_of_modes, noises, Zs)
         # plot evolution of noise and Z, and in second plot on the side evolution of Z_{k+1}-Z_k
         ancestor_number = [mode.node_number for mode in list_of_modes]
@@ -315,7 +317,7 @@ class GraphDiscovery:
         )
         plt.show()
 
-        # adding ancestors to graph and storing activations
+        # adding ancestors to graph and storing activations (step 19)
         activations = list_of_activations[-ancestor_modes.node_number]
         activations = {"/".join(key): value for key, value in activations}
 
@@ -359,10 +361,11 @@ class GraphDiscovery:
         list_of_activations = []
         active_modes = modes
         active_yb = yb
+        # entering loop (step 19 in the paper)
         while active_modes.node_number > 1 and not early_stopping(
             list_of_modes, noises, Zs
         ):
-            # Computing activations
+            # Computing activations and finding least important ancestor (step 14 in the paper)
             energy = -np.dot(ga, active_yb)
             activations = [
                 (
@@ -376,10 +379,9 @@ class GraphDiscovery:
             ]
             list_of_activations.append(activations)
             minimum_activation_cluster = min(activations, key=lambda x: x[1])[0]
-            active_modes = active_modes.delete_cluster(
-                minimum_activation_cluster
-            )  # deleting the cluster with the lowest activation energy
-            # find new noise and regression solution
+            # delete least important ancestor cluster (step 15 in the paper)
+            active_modes = active_modes.delete_cluster(minimum_activation_cluster)
+            # find new noise and regression solution (step 13 in the paper)
             list_of_modes.append(active_modes)
             (
                 yb,
@@ -404,7 +406,7 @@ class GraphDiscovery:
         if active_modes.node_number == 1:
             list_of_activations.append([(active_modes.active_clusters[0], 1 - noise)])
         else:
-            # same computation as above
+            # same computation as above, case of early stopping
             list_of_activations.append(
                 [
                     (
@@ -628,6 +630,7 @@ class GraphDiscovery:
         if len([node for cluster in self.modes.clusters for node in cluster]) == len(
             self.names
         ):  # test if there are any clusters
+            plt.figure(figsize=(10, 4))
             pos = nx.kamada_kawai_layout(self.G, self.G.nodes())
             nx.draw_networkx(
                 self.G,
@@ -641,6 +644,11 @@ class GraphDiscovery:
                 nx.draw_networkx_edge_labels(
                     self.G, pos, edge_labels=nx.get_edge_attributes(self.G, "type")
                 )
+            x_values, y_values = zip(*pos.values())
+            x_max = max(x_values)
+            x_min = min(x_values)
+            x_margin = (x_max - x_min) * 0.25
+            plt.xlim(x_min - x_margin, x_max + x_margin)
             return
 
         # plotting clusters
@@ -648,6 +656,11 @@ class GraphDiscovery:
             item: i for i, sublist in enumerate(self.modes.clusters) for item in sublist
         }
         pos, hypergraph = partition_layout(self.G, cluster_partition)
+        x_values, y_values = zip(*pos.values())
+        x_max = max(x_values)
+        x_min = min(x_values)
+        x_margin = (x_max - x_min) * 0.5
+
         node_sizes = [
             node_size if (node in self.G) else cluster_size
             for node in hypergraph.nodes()
@@ -700,3 +713,4 @@ class GraphDiscovery:
             nx.draw_networkx_edge_labels(
                 self.G, pos, edge_labels=nx.get_edge_attributes(self.G, "type")
             )
+        plt.xlim(x_min - x_margin, x_max + x_margin)
