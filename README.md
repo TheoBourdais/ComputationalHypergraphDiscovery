@@ -61,7 +61,7 @@ graph_discovery.plot_graph()
 
 You should obtain the following graph:
 
-<img style="width:100%;" alt="Resulting graph Sachs example" src="examples\sachs.png"></a>
+<img style="width:100%;" alt="Resulting graph Sachs example" src="_images/genegraph_stage1.png"></a>
 
 
 ## Available modifications of the base algorithm
