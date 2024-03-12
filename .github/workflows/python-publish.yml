@@ -42,11 +42,13 @@ jobs:
         ls -la
         echo "Parent directory's content:"
         ls -la ..
+        echo "src directory's content:"
+        ls -la src
       shell: bash
     - name: Move distribution files
       run: |
-        mkdir -p ../dist
-        mv ./dist/* ../dist/
+        mkdir -p dist
+        mv src/dist/* dist/
     - name: Publish package
       uses: pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29
       with:
