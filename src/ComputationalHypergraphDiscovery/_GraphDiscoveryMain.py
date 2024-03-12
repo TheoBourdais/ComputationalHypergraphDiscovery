@@ -14,7 +14,7 @@ class GraphDiscovery:
     """GraphDiscovery is the main class of CHD. It is used to discover the hypergraph structure of a dataset. It contains a Networkx object G that
     stores the results of graph discovery. It also contains a ModeContainer object that stores the kernel matrices of the modes of the dataset.
     To instantiate a graph discovery, you need:
-        - X: the dataset, as a numpy array of shape (n_features, n_samples)
+        - X: the dataset, as a numpy array of shape (n_features, n_samples) of real numbers.
         - names: the names of the features, as a list of strings
         - mode_kernels: the kernels used to compute the modes of the dataset (must be a mode kernel object). If None, the default kernels are used (linear, quadratic and gaussian)
         - mode_container: Alternatively, if the kernel matrices are already computed (for instance when reusing computations from a previous graph), you can provide a ModeContainer object,
@@ -51,7 +51,7 @@ class GraphDiscovery:
         can be computationally expensive. If you want to reuse computations from a previous graph, you can provide a ModeContainer object instead.
 
         Args:
-        - X (np.ndarray):the dataset, as an array of shape (n_features, n_samples)
+        - X (np.ndarray):the dataset, as an array of shape (n_features, n_samples). Data is treated as real numbers.
         - names (list of strings): the names of the features,
         - mode_kernels (ModeKernelList or ModeKernel, default None): the kernels used to compute the modes of the dataset. If None, the default kernels are used (linear, quadratic and gaussian)
         - mode_container (ModeContainer object, default None): alternatively, if the kernel matrices are already computed (for instance when reusing computations from a previous graph), you can provide a ModeContainer object,
@@ -99,7 +99,7 @@ class GraphDiscovery:
         See the help of the constructor for details on kwargs
 
         Args:
-        - df (pandas.DataFrame): the dataframe containing the data
+        - df (pandas.DataFrame): the dataframe containing the data (consisting of real numbers).
 
         - **kwargs: Any keyword argument of the constructor
 
@@ -298,12 +298,12 @@ class GraphDiscovery:
             yb=kernel_performance[which]["yb"],
             noise=kernel_performance[which]["noise"],
             Z=kernel_performance[which]["Z"],
-            gamma=None
-            if gamma == "auto"
-            and active_modes.is_interpolatory()  # if gamma is "auto" and the modes are interpolatory, gamma is recomputed at each step.
-            else kernel_performance[which][
-                "gamma"
-            ],  # If the modes are not interpolatory, we keep the gamma found above
+            gamma=(
+                None
+                if gamma == "auto"
+                and active_modes.is_interpolatory()  # if gamma is "auto" and the modes are interpolatory, gamma is recomputed at each step.
+                else kernel_performance[which]["gamma"]
+            ),  # If the modes are not interpolatory, we keep the gamma found above
         )
         # choosing ancestors (step 18 in the paper)
         ancestor_modes = mode_chooser(list_of_modes, noises, Zs)
