@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ComputationalHypergraphDiscovery"
-version = "1.0.3"
+version = "1.0.4"
 description = "Implements the Computational Hypergraph Discovery algorithm"
 readme = "README.md"
 authors = [{ name = "Theo Bourdais", email = "tbourdai@caltech.edu"},{ name = "Houman Owhadi", email = "owhadi@caltech.edu"},{ name = "Pau Batlle Franch", email = "pbatllef@caltech.edu"},{ name = "Ricardo Baptista", email = "rsb@caltech.edu"},{ name = "Xianjin Yang", email = "yxjmath@caltech.edu"}]
@@ -29,7 +29,7 @@ requires-python = ">=3.9"
 
 
 [tool.bumpver]
-current_version = "1.0.3"
+current_version = "1.0.4"
 version_pattern = "MAJOR.MINOR.PATCH"
 commit_message = "bump version {old_version} -> {new_version}"
 tag_message = "{new_version}"
