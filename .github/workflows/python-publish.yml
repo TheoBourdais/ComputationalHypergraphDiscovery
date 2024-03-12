@@ -36,6 +36,13 @@ jobs:
       run: |
         cd ./src
         python -m build
+    - name: Print directories content
+      run: |
+        echo "Current directory's content:"
+        ls -la
+        echo "Parent directory's content:"
+        ls -la ..
+      shell: bash
     - name: Move distribution files
       run: |
         mkdir -p ../dist
