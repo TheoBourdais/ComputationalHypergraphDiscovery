@@ -53,8 +53,8 @@ Graph discovery takes very little time. The following code runs the method on th
 import ComputationalHypergraphDiscovery as CHD
 import pandas as pd
 df=pd.read_csv('path_to\SachsData.csv')
-kernel=CHD.Modes.LinearMode()+CHD.Modes.QuadraticMode()
-graph_discovery = CHD.GraphDiscovery.from_dataframe(df,mode_kernel=kernel)
+kernels=CHD.Modes.LinearMode()+CHD.Modes.QuadraticMode()
+graph_discovery = CHD.GraphDiscovery.from_dataframe(df,mode_kernels=kernels)
 graph_discovery.fit()
 graph_discovery.plot_graph()
 ```
@@ -132,6 +132,10 @@ graph_discovery.plot_graph()
 ```
 
 >The `.plot_graph()` method allows for some customization of the resulting plot. See the method's docstring for more details on available parameters. 
+
+
+> **Disclaimer**: Note that the data is assumed to be real numbers. The algorithm only accepts data in the form of a 2D array of shape (n_features,n_samples). Other shapes will be rejected, and other types of data will be treated as real numbers.
+
 
 
 ## Manipulating kernels
