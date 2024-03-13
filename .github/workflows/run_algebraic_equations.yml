@@ -24,7 +24,6 @@ jobs:
         python -m pip install --upgrade pip
         pip install nbconvert ipykernel
         pip install -r ./src/requirements.txt
-        pip install ComputationalHypergraphDiscovery
         # Install any other dependencies your notebook requires
         # For example: pip install numpy pandas matplotlib
 
