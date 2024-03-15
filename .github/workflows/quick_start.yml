@@ -35,6 +35,7 @@ jobs:
         import pandas as pd; \
         import matplotlib.pyplot as plt; \
         df=pd.read_csv('https://raw.githubusercontent.com/TheoBourdais/ComputationalHypergraphDiscovery/main/examples/SachsData.csv'); \
+        df=df.sample(n=2000,random_state=1); \
         kernels=CHD.Modes.LinearMode()+CHD.Modes.QuadraticMode(); \
         graph_discovery = CHD.GraphDiscovery.from_dataframe(df,mode_kernels=kernels); \
         graph_discovery.fit(); \
