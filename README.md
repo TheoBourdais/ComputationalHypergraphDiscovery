@@ -105,7 +105,8 @@ If you have a Pandas dataframe, you can use the `from_dataframe` method (see the
 ```python
 import ComputationalHypergraphDiscovery as CHD
 import pandas as pd
-df=pd.read_csv('examples\sachs.csv')
+df=pd.read_csv('https://raw.githubusercontent.com/TheoBourdais/ComputationalHypergraphDiscovery/main/examples/SachsData.csv')
+df=df.sample(n=500,random_state=1) #subsample to run example quickly
 graph_discovery = CHD.GraphDiscovery.from_dataframe(df)
 ```
 
