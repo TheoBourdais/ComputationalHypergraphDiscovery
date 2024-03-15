@@ -81,7 +81,7 @@ In order to initiate the graph discovery method, you need to create a `GraphDisc
     - `X`: The data used to fit the model. It is a 2D array of shape (n_features,n_samples) where each row is a feature and each column is a sample.
     - `node_names`: The names of the nodes. It is a list of strings of length n_features.
 - **Refinements**:
-    - `mode_kernel`/`mode_container`: The kernel used to link the nodes. If none is provided, a default kernel is used. See the section on [manipulating kernels](#manipulating-kernels) for more details.
+    - `mode_kernels`/`mode_container`: The kernel used to link the nodes. If none is provided, a default kernel is used. See the section on [manipulating kernels](#manipulating-kernels) for more details.
     - `cluster` and `possible_edges`: additional features to inform the graph discovery process and refine the recovery. See the section on [manipulating clusters and possible edges](#manipulating-clusters-and-possible-edges) for more details.
 - **Optional**:
     - `verbose`: to choose whether to print information during the fitting process.
