@@ -30,7 +30,7 @@ jobs:
       run: |
         python -c "\
         import sys; \
-        sys.path.append('../src'); \
+        sys.path.append('./src'); \
         import ComputationalHypergraphDiscovery as CHD; \
         import pandas as pd; \
         import matplotlib.pyplot as plt; \
