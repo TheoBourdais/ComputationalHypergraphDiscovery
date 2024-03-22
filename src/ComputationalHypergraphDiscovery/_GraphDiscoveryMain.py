@@ -69,8 +69,16 @@ class GraphDiscovery:
             names
         ), "X must have as many columns as there are names"
         assert len(X.shape) == 2, "X must be a 2D array"
+        assert not np.isnan(np.sum(X)), "X must not contain NaN values"
+        assert not np.isinf(np.sum(X)), "X must not contain infinite values"
+        standard_devs = X.std(axis=1, keepdims=True)
+        if np.any(standard_devs == 0):
+            raise ValueError(
+                "Some features have a standard deviation of 0. This can lead to numerical instability. Please remove these features."
+            )
+
         if normalize:
-            self.X = (X - X.mean(axis=1, keepdims=True)) / X.std(axis=1, keepdims=True)
+            self.X = (X - X.mean(axis=1, keepdims=True)) / standard_devs
         else:
             self.X = X
         self.print_func = print if verbose else lambda *a, **k: None
