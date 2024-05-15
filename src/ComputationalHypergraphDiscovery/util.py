@@ -155,7 +155,9 @@ def _position_nodes(g, partition, **kwargs):
     return pos
 
 
-def plot_noise_evolution(ancestor_number, list_of_noises, list_of_Zs, ancestor_modes):
+def plot_noise_evolution(
+    ancestor_number, list_of_noises, list_of_Zs, ancestor_modes_number=None
+):
     """
     Plots the evolution of noise and noise increment over the number of ancestors.
 
@@ -198,18 +200,18 @@ def plot_noise_evolution(ancestor_number, list_of_noises, list_of_Zs, ancestor_m
         + [1 - list_of_noises[-1]],
         label="noise increment",
     )
-    if ancestor_modes is not None:
+    if ancestor_modes_number is not None:
         axes[0].axvline(
-            x=ancestor_modes.node_number,
+            x=ancestor_modes_number,
             linestyle="--",
             color="k",
-            label=f"chosen number of ancestors={ancestor_modes.node_number}",
+            label=f"chosen number of ancestors={ancestor_modes_number}",
         )
         axes[1].axvline(
-            x=ancestor_modes.node_number,
+            x=ancestor_modes_number,
             linestyle="--",
             color="k",
-            label=f"chosen number of ancestors={ancestor_modes.node_number}",
+            label=f"chosen number of ancestors={ancestor_modes_number}",
         )
     axes[0].legend()
     axes[0].set_xlabel("number of ancestors")
