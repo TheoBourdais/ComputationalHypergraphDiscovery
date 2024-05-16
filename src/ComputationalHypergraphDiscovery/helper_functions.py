@@ -3,6 +3,7 @@ import jax.numpy as np
 from functools import partial
 from . import interpolatory
 from . import non_interpolatory
+from .Modes import kernels as kClass
 
 
 def make_kernel_performance_function(kernels, gamma_min):
@@ -35,6 +36,7 @@ def make_kernel_performance_function(kernels, gamma_min):
 
     def kernel_performance_function(X, which_dim, ga, key):
         kernel_mats = compute_kernel_mats(X, which_dim)
+
         return mapped_choice(is_interpolatory, kernel_mats, ga, key)
 
     return kernel_performance_function
@@ -54,6 +56,7 @@ def make_prune_ancestors(kernels, loop_number, gamma_min):
             f=f_for_loop, init=init, length=loop_number
         )
         # key = carry[4]
+        active_modes_end = carry[0]
         ancestor_modes = np.concatenate(
             [np.sum(active_modes, axis=0, keepdims=True), ancestor_modes], axis=0
         )
@@ -61,7 +64,11 @@ def make_prune_ancestors(kernels, loop_number, gamma_min):
         Z_high = np.concatenate([np.array([Z[1]]), Z_high], axis=0)
         noises = np.concatenate([np.array([noise]), noises], axis=0)
         activations = np.concatenate(
-            [activations, (1 - noises[-1]) * ancestor_modes[-1:]], axis=0
+            [
+                activations,
+                (1 - noises[-1]) * (np.sum(active_modes_end, axis=1) > 0)[None, :],
+            ],
+            axis=0,
         )
         return ancestor_modes, noises, Z_low, Z_high, activations
 
@@ -69,13 +76,19 @@ def make_prune_ancestors(kernels, loop_number, gamma_min):
 
 
 def make_activation_functions(kernels):
-    kernels_only_var = [
-        lambda *args: kernel.individual_influence(*args) for kernel in kernels
-    ]
+    def apply_influence(*args, kernel):
+        return kernel.individual_influence(*args)
+
+    kernels_only_var = [partial(apply_influence, kernel=kernel) for kernel in kernels]
     chosen_kernel_only_var = lambda i, *args: jax.lax.switch(i, kernels_only_var, *args)
+    all_chosen_kernels = jax.vmap(
+        chosen_kernel_only_var, in_axes=(0, None, None, None, None)
+    )
 
     def activation_no_zero(i, X, which_dim, which_dim_only, yb, energy):
+
         mat = chosen_kernel_only_var(i, X, X, which_dim, which_dim_only)
+        mats = all_chosen_kernels(np.array([0, 1, 2]), X, X, which_dim, which_dim_only)
         return np.dot(yb, mat @ yb) / energy
 
     def activation_zero(i, X, which_dim, which_dim_only, yb, energy):
@@ -202,7 +215,7 @@ def make_find_ancestor_function(
         placeholder_noises = np.zeros(loop_number + 1)
         placeholder_Z_low = np.zeros(loop_number + 1)
         placeholder_Z_high = np.zeros(loop_number + 1)
-        placeholder_activations = np.zeros((loop_number + 1, active_modes.shape[1]))
+        placeholder_activations = np.zeros((loop_number + 1, active_modes.shape[0]))
         return (
             i,
             place_holder_choice,
@@ -221,20 +234,23 @@ def make_find_ancestor_function(
         which_kernel, yb, noise, Z_low, Z_high, gamma, key = kernel_chooser(
             kernel_performance
         )
-        return jax.lax.cond(
-            which_kernel == -1,
-            exit_func,
-            prune_and_choose_ancestor,
-            which_kernel,
-            X,
-            active_modes,
-            noise,
-            Z_low,
-            Z_high,
-            ga,
-            gamma,
-            yb,
-            key,
+        return (
+            *jax.lax.cond(
+                which_kernel == -1,
+                exit_func,
+                prune_and_choose_ancestor,
+                which_kernel,
+                X,
+                active_modes,
+                noise,
+                Z_low,
+                Z_high,
+                ga,
+                gamma,
+                yb,
+                key,
+            ),
+            kernel_performance[1:-1],
         )
 
     return find_ancestor
