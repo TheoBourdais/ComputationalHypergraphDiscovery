@@ -34,9 +34,9 @@ class ModeKernel:
         return self.name
 
     def individual_influence(self, X, Y, which_dim, which_dim_only):
-        whole_k = self(X, X, which_dim)
+        whole_k = self(X, Y, which_dim)
         rest = which_dim * (1 - which_dim_only)
-        rest_k = self(X, X, rest)
+        rest_k = self(X, Y, rest)
         return whole_k - rest_k
 
     def __call__(self, X, Y, which_dim):
@@ -62,11 +62,13 @@ class LinearMode(ModeKernel):
         self.kernel = jax.vmap(jax.vmap(kernel, in_axes=(None, 0, None)), in_axes=(0, None, None))"""
 
         def vectorized_kernel(X, Y, which_dim):
-            return 1 + jnp.dot(X * which_dim[None, :], Y.T)
+            # factor of 2 is added for consistency with the quadratic kernel
+            return 1 + 2 * jnp.dot(X * which_dim[None, :], Y.T)
 
         self.kernel = vectorized_kernel
-        self.kernel_only_var = lambda X, Y, which_dim, which_dim_only: self.kernel(
-            X, Y, which_dim_only
+        self.kernel_only_var = (
+            lambda X, Y, which_dim, which_dim_only: self.kernel(X, Y, which_dim_only)
+            - 1
         )
 
     def individual_influence(self, X, Y, which_dim, which_dim_only):
@@ -112,9 +114,10 @@ class QuadraticMode(ModeKernel):
             return (1 + jnp.dot(X * which_dim[None, :], Y.T)) ** 2
 
         def vectorized_kernel_only_var(X, Y, which_dim, which_dim_only):
-            return (1 + jnp.dot(X * which_dim[None, :], Y.T)) * (
-                1 + jnp.dot(X * which_dim_only[None, :], Y.T)
-            )
+            linear_only = jnp.dot(X * which_dim_only[None, :], Y.T)
+            rest = which_dim * (1 - which_dim_only)
+            linear_rest = jnp.dot(X * rest[None, :], Y.T)
+            return (1 + linear_only) ** 2 + 2 * linear_only * linear_rest - 1
 
         self.kernel = vectorized_kernel
         self.kernel_only_var = vectorized_kernel_only_var
@@ -167,9 +170,11 @@ class GaussianMode(ModeKernel):
             rest = which_dim * (1 - which_dim_only)
             exps_only = jnp.where(which_dim_only == 1, exps, 1)
             exps_rest = 1 + rest * exps
-            return (1 + jnp.dot(x * which_dim, y)) * (
-                1 + jnp.dot(x * which_dim_only, y)
-            ) + jnp.prod(exps_only) * jnp.prod(exps_rest)
+
+            linear_only = jnp.dot(x * which_dim_only, y)
+            linear_rest = jnp.dot(x * rest, y)
+            quadratic = (1 + linear_only) ** 2 + 2 * linear_only * linear_rest - 1
+            return quadratic + jnp.prod(exps_only) * jnp.prod(exps_rest)
 
         self.kernel_only_var = jax.vmap(
             jax.vmap(k_only_var, in_axes=(None, 0, None, None)),
