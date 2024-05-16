@@ -6,6 +6,7 @@ import jax.scipy.linalg as jax_linalg
 from jax import random
 import jax
 from jax.scipy.optimize import minimize
+from tqdm import tqdm
 
 
 from .Modes import ModeContainer, LinearMode, QuadraticMode, GaussianMode
@@ -79,14 +80,14 @@ class GraphDiscovery:
         assert len(X.shape) == 2, "X must be a 2D array"
         assert not np.isnan(np.sum(X)), "X must not contain NaN values"
         assert not np.isinf(np.sum(X)), "X must not contain infinite values"
-        standard_devs = X.std(axis=1, keepdims=True)
+        standard_devs = X.std(axis=0, keepdims=True)
         if np.any(standard_devs == 0):
             raise ValueError(
                 "Some features have a standard deviation of 0. This can lead to numerical instability. Please remove these features."
             )
 
         if normalize:
-            self.X = (X - X.mean(axis=1, keepdims=True)) / standard_devs
+            self.X = (X - X.mean(axis=0, keepdims=True)) / standard_devs
         else:
             self.X = X
         self.print_func = print if verbose else lambda *a, **k: None
@@ -99,7 +100,7 @@ class GraphDiscovery:
 
         self.modes = ModeContainer(self.names, clusters)
         if kernels is None:
-            kernels = [LinearMode(), QuadraticMode(), GaussianMode()]
+            kernels = [LinearMode(), QuadraticMode(), GaussianMode(l=1)]
         self._kernels = kernels
         self.compute_kernel_performance = make_kernel_performance_function(
             kernels=kernels, gamma_min=gamma_min
@@ -225,7 +226,15 @@ class GraphDiscovery:
             early_stopping.is_an_early_stopping()"""
 
         if jit_all:
-            self.find_ancestors = jax.jit(
+            self.find_ancestors = make_find_ancestor_function(
+                self.compute_kernel_performance,
+                self.prune_ancestors,
+                kernel_chooser,
+                mode_chooser,
+                len(self.modes.clusters) - 2,
+            )
+
+            """self.find_ancestors = jax.jit(
                 make_find_ancestor_function(
                     self.compute_kernel_performance,
                     self.prune_ancestors,
@@ -233,7 +242,7 @@ class GraphDiscovery:
                     mode_chooser,
                     len(self.modes.clusters) - 2,
                 )
-            )
+            )"""
         else:
             self.find_ancestors = make_find_ancestor_function(
                 jax.jit(self.compute_kernel_performance),
@@ -255,10 +264,14 @@ class GraphDiscovery:
         Z_lows = []
         Z_highs = []
         activationss = []
+        kernel_performances = []
+
+        pbar = tqdm(
+            total=len(targets), desc="Finding ancestors", position=0, leave=True
+        )
 
         for ga, active_modes, subkey in zip(gas, active_modess, subkeys):
-            assert np.allclose(ga, self.X[:, -1])
-
+            pbar.set_postfix_str(f"Finding ancestors of {targets[pbar.n]}")
             (
                 chosen_kernel,
                 chosen_mode,
@@ -267,6 +280,7 @@ class GraphDiscovery:
                 Z_low,
                 Z_high,
                 activations,
+                kernel_performance,
             ) = self.find_ancestors(self.X, active_modes, ga, subkey)
             chosen_kernels.append(chosen_kernel)
             chosen_modes.append(chosen_mode)
@@ -275,14 +289,9 @@ class GraphDiscovery:
             Z_lows.append(Z_low)
             Z_highs.append(Z_high)
             activationss.append(activations)
-        print("targets\n", targets)
-        print("chosen_kernels\n", chosen_kernels)
-        print("chosen_modes\n", chosen_modes)
-        print("ancestor_modess\n", ancestor_modess)
-        print("noisess\n", noisess)
-        print("Z_lows\n", Z_lows)
-        print("Z_highs\n", Z_highs)
-        print("activationss\n", activationss)
+            kernel_performances.append(kernel_performance)
+            pbar.update(1)
+        pbar.close()
         self.process_results(
             targets,
             chosen_kernels,
@@ -292,6 +301,7 @@ class GraphDiscovery:
             Z_lows,
             Z_highs,
             activationss,
+            kernel_performances,
         )
 
     def _prepare_modes_for_ancestor_finding(self, names):
@@ -337,6 +347,7 @@ class GraphDiscovery:
         Z_lows,
         Z_highs,
         activationss,
+        kernel_performances,
     ):
         """
         Finds ancestors of a given node in the graph. This method is called by the fit method.
@@ -370,6 +381,7 @@ class GraphDiscovery:
             Z_low,
             Z_high,
             activations,
+            kernel_performance,
         ) in zip(
             targets,
             chosen_kernels,
@@ -379,14 +391,42 @@ class GraphDiscovery:
             Z_lows,
             Z_highs,
             activationss,
+            kernel_performances,
         ):
-
-            if which is None:  # case no ancestors, step 7 in the paper
-                self.print_func(f"{name} has no ancestors\n")
-                return
-            self.print_func(
-                f"{name} has ancestors with the kernel {self.kernels[which]} | (n/(s+n)={noises[0]:.2f})"
+            noises_kernel, Z_lows_kernels, Z_highs_kernels, gammas_kernel = (
+                kernel_performance
             )
+            for i, kernel in enumerate(self.kernels):
+                self.print_func(
+                    f"Kernel [{kernel}] has n/(n+s)={noises_kernel[i]}, Z=({Z_lows_kernels[i]:.2f}, {Z_highs_kernels[i]:.2f}), gamma={gammas_kernel[i]:.2e}"
+                )
+
+            if which == -1:  # case no ancestors, step 7 in the paper
+                self.print_func(f"{name} has no ancestors\n")
+                continue
+            self.print_func(
+                f"{name} has ancestors with the kernel [{self.kernels[which]}] | (n/(s+n)={noises[0]:.2f})"
+            )
+            """print(
+                name,
+                "\n",
+                which,
+                "\n",
+                chosen_mode,
+                "\n",
+                ancestor_modes,
+                "\n",
+                noises,
+                "\n",
+                Z_low,
+                "\n",
+                Z_high,
+                "\n activations:\n",
+                activations,
+                "\n",
+                kernel_performance,
+                "\n",
+            )"""
 
             # plot evolution of noise and Z, and in second plot on the side evolution of Z_{k+1}-Z_k
             ancestor_number = [np.sum(mode) for mode in ancestor_modes]
@@ -394,19 +434,32 @@ class GraphDiscovery:
                 ancestor_number,
                 noises,
                 [(Zl, Zh) for Zl, Zh in zip(Z_low, Z_high)],
-                ancestor_number[chosen_mode],
+                node_name=name,
+                ancestor_modes_number=ancestor_number[chosen_mode],
             )
-            plt.show()
             """import pdb
 
             pdb.set_trace()"""
 
             # adding ancestors to graph and storing activations (step 19)
             acivation_per_variable = np.sum(
-                self.modes.index_matrix * activations[:, None], axis=0
+                self.modes.index_matrix * activations[chosen_mode][:, None], axis=0
             )
-            for i, activation in enumerate(acivation_per_variable):
-                self.G.add_edge(self.names[i], name, type=which, signal=activation)
+            active_variables = ancestor_modes[chosen_mode]
+            ancestor_names = []
+            for i, (activation, active) in enumerate(
+                zip(acivation_per_variable, active_variables)
+            ):
+                if active == 1:
+                    ancestor_names.append(self.names[i])
+                    self.G.add_edge(self.names[i], name, type=which, signal=activation)
+                elif active == 0:
+                    continue
+                else:
+                    raise ValueError("Inconsistent activation")
+
+            self.print_func(f"Ancestors of {name}: {ancestor_names}\n")
+            plt.show()
 
     def _iterative_ancestor_pruner(
         ga, modes, gamma, yb, noise, Z, printer, early_stopping, gamma_min
