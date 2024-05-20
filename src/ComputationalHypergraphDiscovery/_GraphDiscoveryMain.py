@@ -187,6 +187,7 @@ class GraphDiscovery:
         mode_chooser=None,
         early_stopping=None,
         jit_all=True,
+        vmap=True,
     ):
         """
         Performs graph discovery. You can provide a list of targets (nodes of the graph) to discover ancestors of these targets. If None, the ancestors of all nodes are discovered.
@@ -266,34 +267,48 @@ class GraphDiscovery:
         activationss = []
         kernel_performances = []
 
-        pbar = tqdm(
-            total=len(targets), desc="Finding ancestors", position=0, leave=True
-        )
+        if vmap:
+            gas = np.array(gas)
+            active_modess = np.array(active_modess)
+            subkeys = np.array(subkeys)
+            results = jax.vmap(self.find_ancestors, in_axes=(None, 0, 0, 0))(
+                self.X, active_modess, gas, subkeys
+            )
+            chosen_kernels = results[0]
+            chosen_modes = results[1]
+            ancestor_modess = results[2]
+            noisess = results[3]
+            Z_lows = results[4]
+            Z_highs = results[5]
+            activationss = results[6]
+            kernel_performances = results[7]
+        else:
+            pbar = tqdm(
+                total=len(targets), desc="Finding ancestors", position=0, leave=True
+            )
+            for ga, active_modes, subkey in zip(gas, active_modess, subkeys):
+                pbar.set_postfix_str(f"Finding ancestors of {targets[pbar.n]}")
+                (
+                    chosen_kernel,
+                    chosen_mode,
+                    ancestor_modes,
+                    noises,
+                    Z_low,
+                    Z_high,
+                    activations,
+                    kernel_performance,
+                ) = self.find_ancestors(self.X, active_modes, ga, subkey)
+                chosen_kernels.append(chosen_kernel)
+                chosen_modes.append(chosen_mode)
+                ancestor_modess.append(ancestor_modes)
+                noisess.append(noises)
+                Z_lows.append(Z_low)
+                Z_highs.append(Z_high)
+                activationss.append(activations)
+                kernel_performances.append(kernel_performance)
 
-        for ga, active_modes, subkey in zip(gas, active_modess, subkeys):
-            pbar.set_postfix_str(f"Finding ancestors of {targets[pbar.n]}")
-            (
-                chosen_kernel,
-                chosen_mode,
-                ancestor_modes,
-                noises,
-                Z_low,
-                Z_high,
-                activations,
-                kernel_performance,
-            ) = self.find_ancestors(self.X, active_modes, ga, subkey)
-            chosen_kernels.append(chosen_kernel)
-            chosen_modes.append(chosen_mode)
-            ancestor_modess.append(ancestor_modes)
-            noisess.append(noises)
-            Z_lows.append(Z_low)
-            Z_highs.append(Z_high)
-            activationss.append(activations)
-            kernel_performances.append(kernel_performance)
-
-            pbar.update(1)
-        chosen_kernel.block_until_ready()
-        pbar.close()
+                pbar.update(1)
+            pbar.close()
         self.process_results(
             targets,
             chosen_kernels,
