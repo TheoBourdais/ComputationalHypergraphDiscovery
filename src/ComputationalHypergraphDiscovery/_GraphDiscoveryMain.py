@@ -136,7 +136,7 @@ class GraphDiscovery:
         - GraphDiscovery object
         """
         X = df.values
-        return GraphDiscovery(X=X.T, names=df.columns, **kwargs)
+        return GraphDiscovery(X=X, names=df.columns, **kwargs)
 
     def prepare_new_graph_with_clusters(self, clusters):
         """
@@ -226,15 +226,15 @@ class GraphDiscovery:
             early_stopping.is_an_early_stopping()"""
 
         if jit_all:
-            self.find_ancestors = make_find_ancestor_function(
+            """self.find_ancestors = make_find_ancestor_function(
                 self.compute_kernel_performance,
                 self.prune_ancestors,
                 kernel_chooser,
                 mode_chooser,
                 len(self.modes.clusters) - 2,
-            )
+            )"""
 
-            """self.find_ancestors = jax.jit(
+            self.find_ancestors = jax.jit(
                 make_find_ancestor_function(
                     self.compute_kernel_performance,
                     self.prune_ancestors,
@@ -242,7 +242,7 @@ class GraphDiscovery:
                     mode_chooser,
                     len(self.modes.clusters) - 2,
                 )
-            )"""
+            )
         else:
             self.find_ancestors = make_find_ancestor_function(
                 jax.jit(self.compute_kernel_performance),
@@ -290,7 +290,9 @@ class GraphDiscovery:
             Z_highs.append(Z_high)
             activationss.append(activations)
             kernel_performances.append(kernel_performance)
+
             pbar.update(1)
+        chosen_kernel.block_until_ready()
         pbar.close()
         self.process_results(
             targets,
