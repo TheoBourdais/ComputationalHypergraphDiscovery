@@ -77,8 +77,8 @@ def Z_test(gamma, cho_factor, key):
     yb_samples = -jax_linalg.cho_solve(cho_factor, samples)
     norms = np.linalg.norm(yb_samples, axis=0) ** 2
     inner_products = np.einsum("ij,ij->j", samples, yb_samples)
-    B_samples = -gamma * norms / inner_products
-    return np.sort(B_samples)[int(0.05 * N)], np.sort(B_samples)[int(0.95 * N)], key
+    B_samples = np.sort(-gamma * norms / inner_products)
+    return B_samples[int(0.05 * N)], B_samples[int(0.95 * N)], key
 
 
 def find_gamma(K, Y, gamma_min):
