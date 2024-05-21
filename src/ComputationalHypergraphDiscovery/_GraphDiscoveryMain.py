@@ -1,3 +1,4 @@
+from functools import partial
 import time
 import jax.numpy as np
 import networkx as nx
@@ -7,14 +8,13 @@ from jax import random
 import jax
 from jax.scipy.optimize import minimize
 from tqdm import tqdm
+from . import interpolatory, non_interpolatory
 
 
 from .Modes import ModeContainer, LinearMode, QuadraticMode, GaussianMode
 from .decision import *
 from .util import partition_layout, plot_noise_evolution
 from .helper_functions import (
-    make_kernel_performance_function,
-    make_prune_ancestors,
     make_find_ancestor_function,
 )
 
@@ -101,16 +101,13 @@ class GraphDiscovery:
         self.modes = ModeContainer(self.names, clusters)
         if kernels is None:
             kernels = [LinearMode(), QuadraticMode(), GaussianMode(l=1)]
+        else:
+            assert len(kernels) == set(
+                [str(k) for k in kernels]
+            ), "Kernels must have different names"
         self._kernels = kernels
-        self.compute_kernel_performance = make_kernel_performance_function(
-            kernels=kernels, gamma_min=gamma_min
-        )
-
-        self.prune_ancestors = make_prune_ancestors(
-            kernels=kernels,
-            loop_number=len(self.modes.clusters) - 2,
-            gamma_min=gamma_min,
-        )
+        self.gamma_min = gamma_min
+        self.prepare_functions()
 
     @property
     def kernels(self):
@@ -179,6 +176,25 @@ class GraphDiscovery:
         new_graph.G.remove_edges_from(edges_to_remove)
         return new_graph
 
+    def prepare_functions(self):
+        self.interpolary_regression_find_gamma = jax.vmap(
+            interpolatory.perform_regression_and_find_gamma,
+            in_axes=(0, 0, None, 0),
+        )
+        self.non_interpolatory_regression_find_gamma = jax.vmap(
+            non_interpolatory.perform_regression_and_find_gamma,
+            in_axes=(0, 0, None, 0),
+        )
+        apply_kernel = lambda k, X, Y, which_dim: k(X, Y, which_dim)
+        self.vmaped_kernel = {
+            k: jax.vmap(partial(apply_kernel, k), in_axes=(None, None, 0))
+            for k in self.kernels
+        }
+        self.ancestor_finding_step_funcs = {
+            kernel: make_find_ancestor_function(kernel, gamma_min=self.gamma_min)
+            for kernel in self.kernels
+        }
+
     def fit(
         self,
         targets=None,
@@ -226,33 +242,6 @@ class GraphDiscovery:
         else:
             early_stopping.is_an_early_stopping()"""
 
-        if jit_all:
-            """self.find_ancestors = make_find_ancestor_function(
-                self.compute_kernel_performance,
-                self.prune_ancestors,
-                kernel_chooser,
-                mode_chooser,
-                len(self.modes.clusters) - 2,
-            )"""
-
-            self.find_ancestors = jax.jit(
-                make_find_ancestor_function(
-                    self.compute_kernel_performance,
-                    self.prune_ancestors,
-                    kernel_chooser,
-                    mode_chooser,
-                    len(self.modes.clusters) - 2,
-                )
-            )
-        else:
-            self.find_ancestors = make_find_ancestor_function(
-                jax.jit(self.compute_kernel_performance),
-                jax.jit(self.prune_ancestors),
-                kernel_chooser,
-                mode_chooser,
-                len(self.modes.clusters) - 2,
-            )
-
         if targets is None:
             targets = self.names
         gas, active_modess = self._prepare_modes_for_ancestor_finding(targets)
@@ -268,58 +257,61 @@ class GraphDiscovery:
         kernel_performances = []
 
         if vmap:
+            print("start")
             gas = np.array(gas)
             active_modess = np.array(active_modess)
             subkeys = np.array(subkeys)
-            results = jax.vmap(self.find_ancestors, in_axes=(None, 0, 0, 0))(
-                self.X, active_modess, gas, subkeys
-            )
-            chosen_kernels = results[0]
-            chosen_modes = results[1]
-            ancestor_modess = results[2]
-            noisess = results[3]
-            Z_lows = results[4]
-            Z_highs = results[5]
-            activationss = results[6]
-            kernel_performances = results[7]
-        else:
-            pbar = tqdm(
-                total=len(targets), desc="Finding ancestors", position=0, leave=True
-            )
-            for ga, active_modes, subkey in zip(gas, active_modess, subkeys):
-                pbar.set_postfix_str(f"Finding ancestors of {targets[pbar.n]}")
-                (
-                    chosen_kernel,
-                    chosen_mode,
-                    ancestor_modes,
-                    noises,
-                    Z_low,
-                    Z_high,
-                    activations,
-                    kernel_performance,
-                ) = self.find_ancestors(self.X, active_modes, ga, subkey)
-                chosen_kernels.append(chosen_kernel)
-                chosen_modes.append(chosen_mode)
-                ancestor_modess.append(ancestor_modes)
-                noisess.append(noises)
-                Z_lows.append(Z_low)
-                Z_highs.append(Z_high)
-                activationss.append(activations)
-                kernel_performances.append(kernel_performance)
 
-                pbar.update(1)
-            pbar.close()
-        self.process_results(
-            targets,
-            chosen_kernels,
-            chosen_modes,
-            ancestor_modess,
-            noisess,
-            Z_lows,
-            Z_highs,
-            activationss,
-            kernel_performances,
-        )
+            kernel_performance = self.get_kernel_performance(
+                active_modess, gas, subkeys
+            )
+
+            ybs, gammas, subkeys, noisess, Z_lows, Z_highs, chosen_kernels = (
+                GraphDiscovery.choose_kernel(kernel_performance, kernel_chooser)
+            )
+
+            for i, kernel in enumerate(self.kernels):
+                mask_kernel = chosen_kernels == i
+
+                (
+                    ancestor_modess,
+                    noisess_kernel,
+                    Z_lows_kernel,
+                    Z_highs_kernel,
+                    activationss_kernel,
+                ) = GraphDiscovery.prune_ancestors(
+                    kernel,
+                    self.ancestor_finding_step_funcs,
+                    X=self.X,
+                    active_modess_kernel=active_modess[mask_kernel],
+                    gas_kernel=gas[mask_kernel],
+                    ybs_kernel=ybs[mask_kernel],
+                    gammas_kernel=gammas[mask_kernel],
+                    subkeys_kernel=subkeys[mask_kernel],
+                    noise_kernel=noisess[mask_kernel],
+                    Z_low_kernel=Z_lows[mask_kernel],
+                    Z_high_kernel=Z_highs[mask_kernel],
+                    loop_number=len(self.modes.clusters) - 2,
+                )
+                self.process_results(
+                    targets,
+                    i,
+                    mask_kernel,
+                    chosen_modes,
+                    ancestor_modess,
+                    noisess_kernel,
+                    Z_lows_kernel,
+                    Z_highs_kernel,
+                    activationss_kernel,
+                    kernel_performance,
+                )
+            self.process_results(
+                targets,
+                -1,
+                chosen_kernels == -1,
+                *([None] * 6),
+                kernel_performance,
+            )
 
     def _prepare_modes_for_ancestor_finding(self, names):
         """
@@ -354,10 +346,123 @@ class GraphDiscovery:
             gas.append(ga)
         return gas, active_modes
 
+    def get_kernel_performance(self, active_modess, gas, subkeys):
+        kernel_performance = []
+        for kernel in self.kernels:
+            print(kernel)
+            K_mat = self.vmaped_kernel[kernel](
+                self.X, self.X, np.sum(active_modess, axis=1)
+            )
+            if kernel.is_interpolatory:
+                res = self.interpolary_regression_find_gamma(
+                    K_mat, gas, self.gamma_min, subkeys
+                )
+            else:
+                res = self.non_interpolatory_regression_find_gamma(
+                    K_mat, gas, self.gamma_min, subkeys
+                )
+            kernel_performance.append(res)
+        kernel_performance = tuple(
+            np.stack([k_perf[i] for k_perf in kernel_performance], axis=1)
+            for i in range(6)
+        )
+        return kernel_performance
+
+    def choose_kernel(kernel_performances, kernel_chooser):
+        ybs = []
+        gammas = []
+        subkeys = []
+        noisess = []
+        Z_lows = []
+        Z_highs = []
+        chosen_kernels = []
+        for i in range(kernel_performances[0].shape[0]):
+            which_kernel, yb, noise, Z_low, Z_high, gamma, skey = kernel_chooser(
+                [kernel_performances[j][i] for j in range(6)]
+            )
+            chosen_kernels.append(which_kernel)
+            ybs.append(yb)
+            noisess.append(noise)
+            Z_lows.append(Z_low)
+            Z_highs.append(Z_high)
+            gammas.append(gamma)
+            subkeys.append(skey)
+        ybs = np.array(ybs)
+        gammas = np.array(gammas)
+        subkeys = np.array(subkeys)
+        noisess = np.array(noisess)
+        Z_lows = np.array(Z_lows)
+        Z_highs = np.array(Z_highs)
+        chosen_kernels = np.array(chosen_kernels)
+        subkeys = np.array(subkeys)
+        return ybs, gammas, subkeys, noisess, Z_lows, Z_highs, chosen_kernels
+
+    def prune_ancestors(
+        kernel,
+        ancestor_finding_step_funcs,
+        X,
+        active_modess_kernel,
+        gas_kernel,
+        ybs_kernel,
+        gammas_kernel,
+        subkeys_kernel,
+        noise_kernel,
+        Z_low_kernel,
+        Z_high_kernel,
+        loop_number,
+    ):
+
+        ancestor_modess = [np.sum(active_modess_kernel, axis=1)]
+        noisess_kernel = [noise_kernel]
+        Z_lows_kernel = [Z_low_kernel]
+        Z_highs_kernel = [Z_high_kernel]
+        activationss_kernel = []
+
+        pbar = tqdm(
+            total=loop_number,
+            desc=f"Finding ancestors with kernel [{kernel}]",
+            position=0,
+            leave=True,
+        )
+        ancestor_finding_step = ancestor_finding_step_funcs[kernel]
+        for _ in range(loop_number):
+            (
+                active_modess_kernel,
+                ybs_kernel,
+                subkeys_kernel,
+                activations,
+                noise,
+                Z_low,
+                Z_high,
+            ) = ancestor_finding_step(
+                X,
+                active_modess_kernel,
+                gas_kernel,
+                gammas_kernel,
+                ybs_kernel,
+                subkeys_kernel,
+            )
+            ancestor_modess.append(np.sum(active_modess_kernel, axis=1))
+            noisess_kernel.append(noise)
+            Z_lows_kernel.append(Z_low)
+            Z_highs_kernel.append(Z_high)
+            activationss_kernel.append(activations)
+
+            pbar.update(1)
+        pbar.close()
+        return (
+            ancestor_modess,
+            noisess_kernel,
+            Z_lows_kernel,
+            Z_highs_kernel,
+            activationss_kernel,
+        )
+
     def process_results(
         self,
         targets,
-        chosen_kernels,
+        chosen_kernel,
+        mask_kernel,
         chosen_modes,
         ancestor_modess,
         noisess,
@@ -389,19 +494,15 @@ class GraphDiscovery:
         Returns:
         - None
         """
+
+        index = 0
         for (
             name,
-            which,
-            chosen_mode,
-            ancestor_modes,
-            noises,
-            Z_low,
-            Z_high,
-            activations,
+            mask,
             kernel_performance,
         ) in zip(
             targets,
-            chosen_kernels,
+            mask_kernel,
             chosen_modes,
             ancestor_modess,
             noisess,
@@ -410,6 +511,8 @@ class GraphDiscovery:
             activationss,
             kernel_performances,
         ):
+            if not mask:
+                continue
             noises_kernel, Z_lows_kernels, Z_highs_kernels, gammas_kernel = (
                 kernel_performance
             )
@@ -418,32 +521,19 @@ class GraphDiscovery:
                     f"Kernel [{kernel}] has n/(n+s)={noises_kernel[i]}, Z=({Z_lows_kernels[i]:.2f}, {Z_highs_kernels[i]:.2f}), gamma={gammas_kernel[i]:.2e}"
                 )
 
-            if which == -1:  # case no ancestors, step 7 in the paper
+            if chosen_kernel == -1:  # case no ancestors, step 7 in the paper
                 self.print_func(f"{name} has no ancestors\n")
+                index += 1
                 continue
             self.print_func(
-                f"{name} has ancestors with the kernel [{self.kernels[which]}] | (n/(s+n)={noises[0]:.2f})"
+                f"{name} has ancestors with the kernel [{self.kernels[chosen_kernel]}] | (n/(s+n)={noises[0]:.2f})"
             )
-            """print(
-                name,
-                "\n",
-                which,
-                "\n",
-                chosen_mode,
-                "\n",
-                ancestor_modes,
-                "\n",
-                noises,
-                "\n",
-                Z_low,
-                "\n",
-                Z_high,
-                "\n activations:\n",
-                activations,
-                "\n",
-                kernel_performance,
-                "\n",
-            )"""
+            chosen_mode = chosen_modes[index]
+            ancestor_modes = ancestor_modess[index]
+            noises = noisess[index]
+            Z_low = Z_lows[index]
+            Z_high = Z_highs[index]
+            activations = activationss[index]
 
             # plot evolution of noise and Z, and in second plot on the side evolution of Z_{k+1}-Z_k
             ancestor_number = [np.sum(mode) for mode in ancestor_modes]
@@ -469,7 +559,12 @@ class GraphDiscovery:
             ):
                 if active == 1:
                     ancestor_names.append(self.names[i])
-                    self.G.add_edge(self.names[i], name, type=which, signal=activation)
+                    self.G.add_edge(
+                        self.names[i],
+                        name,
+                        type=str(self.kernels[chosen_kernel]),
+                        signal=activation,
+                    )
                 elif active == 0:
                     continue
                 else:
@@ -477,6 +572,7 @@ class GraphDiscovery:
 
             self.print_func(f"Ancestors of {name}: {ancestor_names}\n")
             plt.show()
+            index += 1
 
     def _iterative_ancestor_pruner(
         ga, modes, gamma, yb, noise, Z, printer, early_stopping, gamma_min
