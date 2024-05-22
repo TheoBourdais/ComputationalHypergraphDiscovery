@@ -32,7 +32,9 @@ def make_kernel_performance_function(kernels, gamma_min):
             kernel_mat,
         )
 
-    mapped_choice = jax.vmap(choose_interpolatory, in_axes=(0, 0, None, None))
+    mapped_choice = jax.vmap(
+        jax.jit(choose_interpolatory, donate_argnums=(1,)), in_axes=(0, 0, None, None)
+    )
 
     def kernel_performance_function(X, which_dim, ga, key):
         kernel_mats = compute_kernel_mats(X, which_dim)
@@ -75,7 +77,7 @@ def make_prune_ancestors(kernels, loop_number, gamma_min):
     return prune_ancestors
 
 
-def make_activation_function(kernel):
+def make_activation_function(kernel, memory_efficient):
 
     def activation_no_zero(X, which_dim, which_dim_only, yb, energy):
         mat = kernel.individual_influence(X, X, which_dim, which_dim_only)
@@ -97,7 +99,14 @@ def make_activation_function(kernel):
             energy,
         )
 
-    activation_vmap = jax.vmap(activation, in_axes=(None, None, 0, None, None))
+    if not memory_efficient:
+        activation_vmap = jax.vmap(activation, in_axes=(None, None, 0, None, None))
+    else:
+
+        def activation_vmap(X, which_dim, which_dim_only, yb, energy):
+            return jax.lax.map(
+                lambda w: activation(X, which_dim, w, yb, energy), which_dim_only
+            )
 
     def get_activations(X, yb, ga, active_modes):
         energy = -np.dot(ga, yb)
@@ -114,9 +123,9 @@ def make_activation_function(kernel):
     return get_activations
 
 
-def make_find_ancestor_function(kernel, gamma_min):
+def make_find_ancestor_function(kernel, gamma_min, memory_efficient=False):
 
-    get_activations_func = make_activation_function(kernel)
+    get_activations_func = make_activation_function(kernel, memory_efficient)
     if kernel.is_interpolatory:
         perform_regression = interpolatory.perform_regression
     else:
@@ -182,4 +191,4 @@ def make_regression_func(kernels, gamma_min):
             key,
         )
 
-    return perform_regression
+    return jax.jit(perform_regression, donate_argnums=(1,))

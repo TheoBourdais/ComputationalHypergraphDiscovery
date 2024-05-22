@@ -30,6 +30,10 @@ class ModeKernel:
         assert isinstance(res, bool)
         return res
 
+    @property
+    def memory_efficient_required(self):
+        return self._memory_efficient_required
+
     def __repr__(self) -> str:
         return self.name
 
@@ -55,6 +59,7 @@ class LinearMode(ModeKernel):
     def __init__(self, name=None) -> None:
         self.hyperparameters = {}
         self._is_interpolatory = False
+        self._memory_efficient_required = False
         self.name = name if name is not None else "linear"
         """def kernel(x,y,which_dim):
             return 1+np.dot(x*which_dim,y)
@@ -100,6 +105,7 @@ class QuadraticMode(ModeKernel):
     def __init__(self, name=None) -> None:
         self._is_interpolatory = False
         self.name = name if name is not None else "quadratic"
+        self._memory_efficient_required = False
         """def kernel(x,y,which_dim):
             return (1+np.dot(x*which_dim,y))**2
         def kernel_only_var(x,y,which_dim,which_dim_only):
@@ -155,6 +161,7 @@ class GaussianMode(ModeKernel):
     def __init__(self, l, name=None) -> None:
         self._l = l
         self._is_interpolatory = True
+        self._memory_efficient_required = True
         self.name = name if name is not None else "gaussian"
 
         def k(x, y, which_dim):
@@ -166,10 +173,11 @@ class GaussianMode(ModeKernel):
         )
 
         def k_only_var(x, y, which_dim, which_dim_only):
-            exps = jnp.exp(-((x - y) ** 2) / (2 * l**2))
+
             rest = which_dim * (1 - which_dim_only)
-            exps_only = jnp.where(which_dim_only == 1, exps, 1)
-            exps_rest = 1 + rest * exps
+
+            exps_only = jnp.exp(-jnp.sum(which_dim_only * (x - y) ** 2) / (2 * l**2))
+            exps_rest = jnp.prod(1 + rest * jnp.exp(-((x - y) ** 2) / (2 * l**2)))
 
             linear_only = jnp.dot(x * which_dim_only, y)
             linear_rest = jnp.dot(x * rest, y)

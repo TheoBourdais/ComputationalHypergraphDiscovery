@@ -102,8 +102,8 @@ class GraphDiscovery:
         if kernels is None:
             kernels = [LinearMode(), QuadraticMode(), GaussianMode(l=1)]
         else:
-            assert len(kernels) == set(
-                [str(k) for k in kernels]
+            assert len(kernels) == len(
+                set([str(k) for k in kernels])
             ), "Kernels must have different names"
         self._kernels = kernels
         self.gamma_min = gamma_min
@@ -191,7 +191,11 @@ class GraphDiscovery:
             for k in self.kernels
         }
         self.ancestor_finding_step_funcs = {
-            kernel: make_find_ancestor_function(kernel, gamma_min=self.gamma_min)
+            kernel: make_find_ancestor_function(
+                kernel,
+                gamma_min=self.gamma_min,
+                memory_efficient=kernel.memory_efficient_required,
+            )
             for kernel in self.kernels
         }
 
@@ -248,7 +252,6 @@ class GraphDiscovery:
         # running ancestor finding for each target
         key, *subkeys = random.split(key, len(targets) + 1)
         chosen_kernels = []
-        chosen_modes = []
         ancestor_modess = []
         noisess = []
         Z_lows = []
@@ -293,6 +296,7 @@ class GraphDiscovery:
                     Z_high_kernel=Z_highs[mask_kernel],
                     loop_number=len(self.modes.clusters) - 2,
                 )
+                chosen_modes = mode_chooser.choose_mode()
                 self.process_results(
                     targets,
                     i,
@@ -496,24 +500,21 @@ class GraphDiscovery:
         """
 
         index = 0
+        import pdb
+
+        pdb.set_trace()
         for (
             name,
             mask,
-            kernel_performance,
+            *kernel_performance,
         ) in zip(
             targets,
             mask_kernel,
-            chosen_modes,
-            ancestor_modess,
-            noisess,
-            Z_lows,
-            Z_highs,
-            activationss,
-            kernel_performances,
+            *kernel_performances,
         ):
             if not mask:
                 continue
-            noises_kernel, Z_lows_kernels, Z_highs_kernels, gammas_kernel = (
+            _, noises_kernel, Z_lows_kernels, Z_highs_kernels, gammas_kernel, _ = (
                 kernel_performance
             )
             for i, kernel in enumerate(self.kernels):
@@ -526,7 +527,7 @@ class GraphDiscovery:
                 index += 1
                 continue
             self.print_func(
-                f"{name} has ancestors with the kernel [{self.kernels[chosen_kernel]}] | (n/(s+n)={noises[0]:.2f})"
+                f"{name} has ancestors with the kernel [{self.kernels[chosen_kernel]}] | (n/(s+n)={noises_kernel[0]:.2f})"
             )
             chosen_mode = chosen_modes[index]
             ancestor_modes = ancestor_modess[index]
