@@ -43,6 +43,23 @@ class ModeKernel:
         rest_k = self(X, Y, rest)
         return whole_k - rest_k
 
+    def activation(self, X, which_dim, which_dim_only, yb):
+        """
+        Compute the activation of the kernel for a given data point.
+        This is done by computing the kernel matrix with the data matrix, and then taking the dot product with the target vector.
+
+        Args:
+        - X (np.array): The data matrix.
+        - which_dim (np.array): The dimension of the data matrix.
+        - which_dim_only (int): The index of the data point to compute the activation for.
+        - yb (np.array): The target vector.
+
+        Returns:
+        - np.array: The activation of the kernel for the data point.
+        """
+        mat = self.individual_influence(X, X, which_dim, which_dim_only)
+        return jnp.dot(yb, mat @ yb)
+
     def __call__(self, X, Y, which_dim):
         return self.kernel(X, Y, which_dim)
 
@@ -161,33 +178,66 @@ class GaussianMode(ModeKernel):
     def __init__(self, l, name=None) -> None:
         self._l = l
         self._is_interpolatory = True
-        self._memory_efficient_required = True
+        self._memory_efficient_required = False
         self.name = name if name is not None else "gaussian"
 
-        def k(x, y, which_dim):
-            exps = 1 + which_dim * jnp.exp(-((x - y) ** 2) / (2 * l**2))
-            return (1 + jnp.dot(x * which_dim, y)) ** 2 + jnp.prod(exps)
+        self.quadratic_part = QuadraticMode()
 
-        self.kernel = jax.vmap(
-            jax.vmap(k, in_axes=(None, 0, None)), in_axes=(0, None, None)
-        )
+        """def k(X, Y, which_dim):
+            exps = self.vmaped_gaussian_exp(X, Y)
+            # print(exps.shape)
+            return self.quadratic_part(X, Y, which_dim) + jnp.prod(
+                1 + exps, axis=2, where=which_dim
+            )"""
 
-        def k_only_var(x, y, which_dim, which_dim_only):
+        def k_indiv(x, y, which_dim):
+            exp = jnp.exp(-((x * which_dim - y * which_dim) ** 2) / (2 * self.l**2))
+            return jnp.prod(1 + exp)
+
+        k_indiv_mapped = jax.vmap(k_indiv, in_axes=(0, None, None))
+        k_indiv_mapped = jax.vmap(k_indiv_mapped, in_axes=(None, 0, None))
+
+        def k(X, Y, which_dim):
+            return k_indiv_mapped(X, Y, which_dim) + self.quadratic_part(
+                X, Y, which_dim
+            )
+
+        self.kernel = k
+
+        """def k_only_var(X, Y, which_dim, which_dim_only):
+            exps = self.vmaped_gaussian_exp(X, Y)
 
             rest = which_dim * (1 - which_dim_only)
 
-            exps_only = jnp.exp(-jnp.sum(which_dim_only * (x - y) ** 2) / (2 * l**2))
-            exps_rest = jnp.prod(1 + rest * jnp.exp(-((x - y) ** 2) / (2 * l**2)))
+            exps_only = jnp.prod(exps, axis=2, where=which_dim_only)
+            exps_rest = jnp.prod(1 + exps, axis=2, where=rest)
+            return (
+                self.quadratic_part.individual_influence(
+                    X, Y, which_dim, which_dim_only
+                )
+                + exps_only * exps_rest
+            )"""
 
-            linear_only = jnp.dot(x * which_dim_only, y)
-            linear_rest = jnp.dot(x * rest, y)
-            quadratic = (1 + linear_only) ** 2 + 2 * linear_only * linear_rest - 1
-            return quadratic + jnp.prod(exps_only) * jnp.prod(exps_rest)
+        def k_only_var_indiv(x, y, which_dim, which_dim_only):
+            exp_only = jnp.exp(
+                -((x * which_dim_only - y * which_dim_only) ** 2) / (2 * self.l**2)
+            )
+            rest = which_dim * (1 - which_dim_only)
+            return jnp.prod(exp_only) * k_indiv(x, y, rest)
 
-        self.kernel_only_var = jax.vmap(
-            jax.vmap(k_only_var, in_axes=(None, 0, None, None)),
-            in_axes=(0, None, None, None),
+        k_only_var_indiv_mapped = jax.vmap(
+            k_only_var_indiv, in_axes=(0, None, None, None)
         )
+        k_only_var_indiv_mapped = jax.vmap(
+            k_only_var_indiv_mapped, in_axes=(None, 0, None, None)
+        )
+
+        def k_only_var(X, Y, which_dim, which_dim_only):
+            return self.quadratic_part.individual_influence(
+                X, Y, which_dim, which_dim_only
+            ) + k_only_var_indiv_mapped(X, Y, which_dim, which_dim_only)
+
+        self.kernel_only_var = k_only_var
 
     def individual_influence(self, X, Y, which_dim, which_dim_only):
         """
@@ -204,6 +254,10 @@ class GaussianMode(ModeKernel):
         - np.array: The influence of each data point on the prediction.
         """
         return self.kernel_only_var(X, Y, which_dim, which_dim_only)
+
+    def activation(self, X, which_dim, which_dim_only, yb):
+        exps = self.vmaped_gaussian_exp(X, X)
+        activations = jnp.einsum("ni,nj,ijk->nk", yb, yb, exps)
 
     @property
     def l(self):

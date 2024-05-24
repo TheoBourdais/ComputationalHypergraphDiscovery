@@ -177,24 +177,30 @@ class GraphDiscovery:
         return new_graph
 
     def prepare_functions(self):
-        self.interpolary_regression_find_gamma = jax.vmap(
-            interpolatory.perform_regression_and_find_gamma,
-            in_axes=(0, 0, None, 0),
+        self.interpolary_regression_find_gamma = jax.jit(
+            jax.vmap(
+                interpolatory.perform_regression_and_find_gamma,
+                in_axes=(0, 0, None, 0),
+            )
         )
-        self.non_interpolatory_regression_find_gamma = jax.vmap(
-            non_interpolatory.perform_regression_and_find_gamma,
-            in_axes=(0, 0, None, 0),
+        self.non_interpolatory_regression_find_gamma = jax.jit(
+            jax.vmap(
+                non_interpolatory.perform_regression_and_find_gamma,
+                in_axes=(0, 0, None, 0),
+            )
         )
         apply_kernel = lambda k, X, Y, which_dim: k(X, Y, which_dim)
         self.vmaped_kernel = {
-            k: jax.vmap(partial(apply_kernel, k), in_axes=(None, None, 0))
+            k: jax.jit(jax.vmap(partial(apply_kernel, k), in_axes=(None, None, 0)))
             for k in self.kernels
         }
         self.ancestor_finding_step_funcs = {
-            kernel: make_find_ancestor_function(
-                kernel,
-                gamma_min=self.gamma_min,
-                memory_efficient=kernel.memory_efficient_required,
+            kernel: jax.jit(
+                make_find_ancestor_function(
+                    kernel,
+                    gamma_min=self.gamma_min,
+                    memory_efficient=kernel.memory_efficient_required,
+                )
             )
             for kernel in self.kernels
         }
@@ -241,6 +247,7 @@ class GraphDiscovery:
             mode_chooser = MaxIncrementModeChooser()
         else:
             mode_chooser.is_a_mode_chooser()
+        mode_chooser = jax.jit(jax.vmap(mode_chooser, in_axes=(0, 0, (0, 0))))
         """if early_stopping is None:
             early_stopping = NoEarlyStopping()
         else:
@@ -251,71 +258,111 @@ class GraphDiscovery:
         gas, active_modess = self._prepare_modes_for_ancestor_finding(targets)
         # running ancestor finding for each target
         key, *subkeys = random.split(key, len(targets) + 1)
-        chosen_kernels = []
-        ancestor_modess = []
-        noisess = []
-        Z_lows = []
-        Z_highs = []
-        activationss = []
-        kernel_performances = []
 
-        if vmap:
-            print("start")
-            gas = np.array(gas)
-            active_modess = np.array(active_modess)
-            subkeys = np.array(subkeys)
+        gas = np.array(gas)
+        active_modess = np.array(active_modess)
+        subkeys = np.array(subkeys)
 
-            kernel_performance = self.get_kernel_performance(
-                active_modess, gas, subkeys
+        kernel_performance = self.get_kernel_performance(active_modess, gas, subkeys)
+
+        ybs, gammas, subkeys, noisess, Z_lows, Z_highs, chosen_kernels = (
+            GraphDiscovery.choose_kernel(kernel_performance, kernel_chooser)
+        )
+
+        for i, kernel in enumerate(self.kernels):
+            mask_kernel = chosen_kernels == i
+
+            (
+                active_modess_kernel,
+                noisess_kernel,
+                Z_lows_kernel,
+                Z_highs_kernel,
+                activationss_kernel,
+            ) = GraphDiscovery.prune_ancestors(
+                kernel,
+                self.ancestor_finding_step_funcs,
+                X=self.X,
+                active_modess_kernel=active_modess[mask_kernel],
+                gas_kernel=gas[mask_kernel],
+                ybs_kernel=ybs[mask_kernel],
+                gammas_kernel=gammas[mask_kernel],
+                subkeys_kernel=subkeys[mask_kernel],
+                noise_kernel=noisess[mask_kernel],
+                Z_low_kernel=Z_lows[mask_kernel],
+                Z_high_kernel=Z_highs[mask_kernel],
+                loop_number=len(self.modes.clusters) - 2,
+            )
+            anomaly_noise = np.logical_or(noisess_kernel > 1.05, noisess_kernel < -0.05)
+            anomaly_Z_low = np.logical_or(Z_lows_kernel > 1.05, Z_lows_kernel < -0.05)
+            anomaly_Z_high = np.logical_or(
+                Z_highs_kernel > 1.05, Z_highs_kernel < -0.05
             )
 
-            ybs, gammas, subkeys, noisess, Z_lows, Z_highs, chosen_kernels = (
-                GraphDiscovery.choose_kernel(kernel_performance, kernel_chooser)
+            if np.any(anomaly_noise) or np.any(anomaly_Z_low) or np.any(anomaly_Z_high):
+                print(
+                    "-" * 50
+                    + "\n** Anomaly in noise or Z values, consider increasing gamma_min **\n"
+                    + "-" * 50
+                )
+                first_occurence_noise = np.argmax(anomaly_noise, axis=1, keepdims=True)
+                first_occurence_Z_low = np.argmax(anomaly_Z_low, axis=1, keepdims=True)
+                first_occurence_Z_high = np.argmax(
+                    anomaly_Z_high, axis=1, keepdims=True
+                )
+                print(anomaly_noise)
+                print(noisess_kernel)
+                noisess_kernel = np.where(
+                    np.logical_and(
+                        np.arange(noisess_kernel.shape[1])[None, :]
+                        >= first_occurence_noise,
+                        np.any(anomaly_noise, axis=1, keepdims=True),
+                    ),
+                    1.0,
+                    noisess_kernel,
+                )
+                Z_lows_kernel = np.where(
+                    np.logical_and(
+                        np.arange(Z_lows_kernel.shape[1])[None, :]
+                        >= first_occurence_Z_low,
+                        np.any(anomaly_Z_low, axis=1, keepdims=True),
+                    ),
+                    1.0,
+                    Z_lows_kernel,
+                )
+                Z_highs_kernel = np.where(
+                    np.logical_and(
+                        np.arange(Z_highs_kernel.shape[1])[None, :]
+                        >= first_occurence_Z_high,
+                        np.any(anomaly_Z_high, axis=1, keepdims=True),
+                    ),
+                    1.0,
+                    Z_highs_kernel,
+                )
+
+            chosen_modes = mode_chooser(
+                active_modess_kernel,
+                noisess_kernel,
+                (Z_lows_kernel, Z_highs_kernel),
             )
-
-            for i, kernel in enumerate(self.kernels):
-                mask_kernel = chosen_kernels == i
-
-                (
-                    ancestor_modess,
-                    noisess_kernel,
-                    Z_lows_kernel,
-                    Z_highs_kernel,
-                    activationss_kernel,
-                ) = GraphDiscovery.prune_ancestors(
-                    kernel,
-                    self.ancestor_finding_step_funcs,
-                    X=self.X,
-                    active_modess_kernel=active_modess[mask_kernel],
-                    gas_kernel=gas[mask_kernel],
-                    ybs_kernel=ybs[mask_kernel],
-                    gammas_kernel=gammas[mask_kernel],
-                    subkeys_kernel=subkeys[mask_kernel],
-                    noise_kernel=noisess[mask_kernel],
-                    Z_low_kernel=Z_lows[mask_kernel],
-                    Z_high_kernel=Z_highs[mask_kernel],
-                    loop_number=len(self.modes.clusters) - 2,
-                )
-                chosen_modes = mode_chooser.choose_mode()
-                self.process_results(
-                    targets,
-                    i,
-                    mask_kernel,
-                    chosen_modes,
-                    ancestor_modess,
-                    noisess_kernel,
-                    Z_lows_kernel,
-                    Z_highs_kernel,
-                    activationss_kernel,
-                    kernel_performance,
-                )
             self.process_results(
                 targets,
-                -1,
-                chosen_kernels == -1,
-                *([None] * 6),
+                i,
+                mask_kernel,
+                chosen_modes,
+                active_modess_kernel,
+                noisess_kernel,
+                Z_lows_kernel,
+                Z_highs_kernel,
+                activationss_kernel,
                 kernel_performance,
             )
+        self.process_results(
+            targets,
+            -1,
+            chosen_kernels == -1,
+            *([None] * 6),
+            kernel_performance,
+        )
 
     def _prepare_modes_for_ancestor_finding(self, names):
         """
@@ -353,7 +400,6 @@ class GraphDiscovery:
     def get_kernel_performance(self, active_modess, gas, subkeys):
         kernel_performance = []
         for kernel in self.kernels:
-            print(kernel)
             K_mat = self.vmaped_kernel[kernel](
                 self.X, self.X, np.sum(active_modess, axis=1)
             )
@@ -429,7 +475,7 @@ class GraphDiscovery:
             leave=True,
         )
         ancestor_finding_step = ancestor_finding_step_funcs[kernel]
-        for _ in range(loop_number):
+        for step in range(loop_number):
             (
                 active_modess_kernel,
                 ybs_kernel,
@@ -454,12 +500,13 @@ class GraphDiscovery:
 
             pbar.update(1)
         pbar.close()
+
         return (
-            ancestor_modess,
-            noisess_kernel,
-            Z_lows_kernel,
-            Z_highs_kernel,
-            activationss_kernel,
+            np.stack(ancestor_modess, axis=1),
+            np.stack(noisess_kernel, axis=1),
+            np.stack(Z_lows_kernel, axis=1),
+            np.stack(Z_highs_kernel, axis=1),
+            np.stack(activationss_kernel, axis=1),
         )
 
     def process_results(
@@ -500,9 +547,7 @@ class GraphDiscovery:
         """
 
         index = 0
-        import pdb
 
-        pdb.set_trace()
         for (
             name,
             mask,
@@ -514,6 +559,7 @@ class GraphDiscovery:
         ):
             if not mask:
                 continue
+            self.print_func(f"\nResults for {name}")
             _, noises_kernel, Z_lows_kernels, Z_highs_kernels, gammas_kernel, _ = (
                 kernel_performance
             )
@@ -545,9 +591,6 @@ class GraphDiscovery:
                 node_name=name,
                 ancestor_modes_number=ancestor_number[chosen_mode],
             )
-            """import pdb
-
-            pdb.set_trace()"""
 
             # adding ancestors to graph and storing activations (step 19)
             acivation_per_variable = np.sum(
@@ -574,98 +617,6 @@ class GraphDiscovery:
             self.print_func(f"Ancestors of {name}: {ancestor_names}\n")
             plt.show()
             index += 1
-
-    def _iterative_ancestor_pruner(
-        ga, modes, gamma, yb, noise, Z, printer, early_stopping, gamma_min
-    ):
-        """
-        Iteratively prunes the ancestor clusters of a hypergraph until only one cluster remains.
-        The pruning is done by removing the cluster with the lowest activation energy.
-        See the paper for more details on the pruning procedure.
-        The function returns the list of modes, noises, Zs, and list_of_activations at each iteration.
-
-        Args:
-        - ga (numpy.ndarray): The data of the node for which the ancestors are being pruned.
-        - modes (Modes): Modes of the GraphDiscovery.
-        - gamma (float): The regularization parameter.
-        - yb (numpy.ndarray): The solution of the original regression performed to find the kernel in _find_ancestors.
-        - noise (float): The noise level of the original regression performed to find the kernel in _find_ancestors.
-        - Z (tuple): The Z value of the original regression performed to find the kernel in _find_ancestors.
-        - printer (function): The function used to print the progress.
-        - early_stopping (EarlyStopping): The function used to determine if the pruning should stop early.
-        - gamma_min (float): The minimum value of gamma.
-
-        Returns:
-        - list_of_modes (list): The list of cluster trees at each iteration.
-        - noises (list): The list of noise levels at each iteration.
-        - Zs (list): The list of Z values at each iteration.
-        - list_of_activations (list): The list of activations at each iteration.
-        """
-        noises = [noise]
-        Zs = [Z]
-        list_of_modes = [modes]
-        list_of_activations = []
-        active_modes = modes
-        active_yb = yb
-        # entering loop (step 19 in the paper)
-        while active_modes.node_number > 1 and not early_stopping(
-            list_of_modes, noises, Zs
-        ):
-            # Computing activations and finding least important ancestor (step 14 in the paper)
-            energy = -np.dot(ga, active_yb)
-            activations = [
-                (
-                    cluster,
-                    np.dot(
-                        active_yb, active_modes.get_K_of_cluster(cluster) @ active_yb
-                    )
-                    / energy,
-                )
-                for cluster in active_modes.active_clusters
-            ]
-            list_of_activations.append(activations)
-            minimum_activation_cluster = min(activations, key=lambda x: x[1])[0]
-            # delete least important ancestor cluster (step 15 in the paper)
-            active_modes = active_modes.delete_cluster(minimum_activation_cluster)
-            # find new noise and regression solution (step 13 in the paper)
-            list_of_modes.append(active_modes)
-            (
-                yb,
-                noise,
-                (Z_low, Z_high),
-                gamma_used,
-            ) = GraphDiscovery._perform_regression(
-                K=active_modes.get_K(),
-                gamma=gamma,
-                gamma_min=gamma_min,
-                ga=ga,
-                printer=printer,
-                interpolatory=active_modes.is_interpolatory(),
-            )
-            noises.append(noise)
-            Zs.append((Z_low, Z_high))
-            active_yb = yb
-            printer(
-                f"ancestors : {active_modes}\n using gamma={gamma_used:.2e}, n/(n+s)={noise:.2f}, Z={Z_low:.2f}"
-            )
-        # adding last activation after exiting the loop
-        if active_modes.node_number == 1:
-            list_of_activations.append([(active_modes.active_clusters[0], 1 - noise)])
-        else:
-            # same computation as above, case of early stopping
-            list_of_activations.append(
-                [
-                    (
-                        name,
-                        np.dot(
-                            active_yb, active_modes.get_K_of_cluster(name) @ active_yb
-                        )
-                        / energy,
-                    )
-                    for name in active_modes.active_clusters
-                ]
-            )
-        return list_of_modes, noises, Zs, list_of_activations
 
     def plot_graph(self, type_label=True, **kwargs):
         """

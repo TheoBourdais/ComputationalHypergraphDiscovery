@@ -44,81 +44,38 @@ def make_kernel_performance_function(kernels, gamma_min):
     return kernel_performance_function
 
 
-def make_prune_ancestors(kernels, loop_number, gamma_min):
-    chosen_kernel = lambda i, *args: jax.lax.switch(i, kernels, *args)
-    get_activations = make_activation_functions(kernels)
-    perform_regression = make_regression_func(kernels, gamma_min)
-    f_for_loop = make_for_loop_function(
-        get_activations, chosen_kernel, perform_regression
-    )
-
-    def prune_ancestors(i, X, active_modes, noise, Z, ga, gamma, yb, key):
-        init = (active_modes, ga, gamma, yb, key, X, i)
-        carry, (ancestor_modes, activations, noises, Z_low, Z_high) = jax.lax.scan(
-            f=f_for_loop, init=init, length=loop_number
-        )
-        # key = carry[4]
-        active_modes_end = carry[0]
-        ancestor_modes = np.concatenate(
-            [np.sum(active_modes, axis=0, keepdims=True), ancestor_modes], axis=0
-        )
-        Z_low = np.concatenate([np.array([Z[0]]), Z_low], axis=0)
-        Z_high = np.concatenate([np.array([Z[1]]), Z_high], axis=0)
-        noises = np.concatenate([np.array([noise]), noises], axis=0)
-        activations = np.concatenate(
-            [
-                activations,
-                (1 - noises[-1]) * (np.sum(active_modes_end, axis=1) > 0)[None, :],
-            ],
-            axis=0,
-        )
-        return ancestor_modes, noises, Z_low, Z_high, activations
-
-    return prune_ancestors
-
-
 def make_activation_function(kernel, memory_efficient):
 
-    def activation_no_zero(X, which_dim, which_dim_only, yb, energy):
+    def activation(X, which_dim, which_dim_only, yb):
         mat = kernel.individual_influence(X, X, which_dim, which_dim_only)
-        return np.dot(yb, mat @ yb) / energy
-
-    def activation_zero(X, which_dim, which_dim_only, yb, energy):
-        return 2.0
-
-    def activation(X, which_dim, which_dim_only, yb, energy):
-        is_zero = np.all(which_dim_only == 0)
-        return jax.lax.cond(
-            is_zero,
-            activation_zero,
-            activation_no_zero,
-            X,
-            which_dim,
-            which_dim_only,
-            yb,
-            energy,
-        )
+        return np.dot(yb, mat @ yb)
 
     if not memory_efficient:
-        activation_vmap = jax.vmap(activation, in_axes=(None, None, 0, None, None))
+        activation_vmap = jax.vmap(activation, in_axes=(None, None, 0, None))
     else:
 
-        def activation_vmap(X, which_dim, which_dim_only, yb, energy):
+        def activation_vmap(X, which_dim, which_dim_only, yb):
             return jax.lax.map(
-                lambda w: activation(X, which_dim, w, yb, energy), which_dim_only
+                lambda w: activation(X, which_dim, w, yb), which_dim_only
             )
+
+    """activation_vmap = jax.vmap(activation, in_axes=(None, 0, 0, 0))
+    activation_vmap = jax.vmap(activation_vmap, in_axes=(None, None, 1, None))
+"""
+    """def get_activations(X, ybs, gas, active_modess):
+        energies = -np.vecdot(gas, ybs)
+        which_dim = np.sum(active_modess, axis=1)
+        activations = activation_vmap(X, which_dim, active_modess, ybs) / energies
+        return np.where(
+            np.all(active_modess == 0, axis=2, keepdims=True), activations, 2.0
+        )"""
 
     def get_activations(X, yb, ga, active_modes):
         energy = -np.dot(ga, yb)
         which_dim = np.sum(active_modes, axis=0)
-        activations = activation_vmap(
-            X,
-            which_dim,
-            active_modes,
-            yb,
-            energy,
-        )
-        return activations
+        activations = activation_vmap(X, which_dim, active_modes, yb) / energy
+        activations = np.clip(activations, 0, None) / np.max(activations)
+        return np.where(np.all(active_modes == 0, axis=1), 2.0, activations)
 
     return get_activations
 
@@ -132,6 +89,7 @@ def make_find_ancestor_function(kernel, gamma_min, memory_efficient=False):
         perform_regression = non_interpolatory.perform_regression
 
     def step(X, active_modes, ga, gamma, yb, key):
+
         activations = get_activations_func(X, yb, ga, active_modes)
         min_activation = np.argmin(activations)
         active_modes = active_modes.at[min_activation, :].set(0)
@@ -139,6 +97,7 @@ def make_find_ancestor_function(kernel, gamma_min, memory_efficient=False):
         yb, noise, Z_low, Z_high, gamma, key = perform_regression(
             K=mat, ga=ga, gamma=gamma, key=key, gamma_min=gamma_min
         )
+
         return (active_modes, yb, key, activations, noise, Z_low, Z_high)
 
     return jax.vmap(step, in_axes=(None, 0, 0, 0, 0, 0))

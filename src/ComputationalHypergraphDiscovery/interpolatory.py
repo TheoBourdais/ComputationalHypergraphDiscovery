@@ -37,12 +37,13 @@ def perform_regression_and_find_gamma(K, ga, gamma_min, key):
         eigenvalues=eigenvalues,
         gamma_min=gamma_min,
     )
-    eigenvalues += gamma
+    # eigenvalues += gamma
 
     yb, noise = solve_variationnal(
         ga, gamma=gamma, eigenvalues=eigenvalues, eigenvectors=eigenvectors
     )
     Z_low, Z_high, key = Z_test(gamma, eigenvalues, eigenvectors, key)
+
     return yb, noise, Z_low, Z_high, gamma, key
 
 
@@ -60,9 +61,12 @@ def solve_variationnal(ga, gamma, eigenvalues, eigenvectors):
     - noise(float): A float representing the noise value.
     """
     # solve yb = -K^-1@ga using the eigendeomposition of K
-    yb = -np.dot(eigenvectors, np.dot(eigenvectors.T, ga) / eigenvalues[:])
+    Pga = np.dot(eigenvectors.T, ga)
+    coeffs = gamma / (eigenvalues + gamma)
+    Pgacoeff = Pga * coeffs
+    noise = np.dot(Pgacoeff, Pgacoeff) / np.dot(Pgacoeff, Pga)
+    yb = -np.dot(eigenvectors, Pga / (eigenvalues + gamma))
 
-    noise = -gamma * np.dot(yb, yb) / np.dot(ga, yb)
     return yb, noise
 
 
@@ -80,12 +84,13 @@ def Z_test(gamma, eigenvalues, eigenvectors, key):
     N = 100
     key, subkey = random.split(key)
     samples = random.normal(subkey, shape=(eigenvectors.shape[0], N))
-    yb_samples = -np.dot(
-        eigenvectors, np.dot(eigenvectors.T, samples) / eigenvalues[:, None]
+    Pgas = np.dot(eigenvectors.T, samples)
+    coeffs = gamma / (eigenvalues + gamma)
+    Pgas_coeffs = Pgas * coeffs[:, None]
+    noises = np.vecdot(Pgas_coeffs, Pgas_coeffs, axis=0) / np.vecdot(
+        Pgas_coeffs, Pgas, axis=0
     )
-    norms = np.linalg.norm(yb_samples, axis=0) ** 2
-    inner_products = np.einsum("ij,ij->j", samples, yb_samples)
-    B_samples = np.sort(-gamma * norms / inner_products)
+    B_samples = np.sort(noises)
     return B_samples[int(0.05 * N)], B_samples[int(0.95 * N)], key
 
 
@@ -109,7 +114,9 @@ def find_gamma(eigenvalues, gamma_min):
         return -np.var(1 / (1 + eigenvalues * np.exp(-gamma_log)))
 
     res = minimize(
-        eigenvalue_variance, np.log(np.mean(eigenvalues, keepdims=True)), method="BFGS"
+        eigenvalue_variance,
+        np.log(np.median(eigenvalues, keepdims=True)),
+        method="BFGS",
     )
     gamma = np.exp(res.x[0])
     gamma_med = np.median(eigenvalues)
