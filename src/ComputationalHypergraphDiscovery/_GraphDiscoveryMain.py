@@ -14,9 +14,7 @@ from . import interpolatory, non_interpolatory
 from .Modes import ModeContainer, LinearMode, QuadraticMode, GaussianMode
 from .decision import *
 from .util import partition_layout, plot_noise_evolution
-from .helper_functions import (
-    make_find_ancestor_function,
-)
+from .helper_functions import make_find_ancestor_function, make_preprocessing_functions
 
 
 class GraphDiscovery:
@@ -94,6 +92,12 @@ class GraphDiscovery:
         self.names = names
 
         self.name_to_index = {name: index for index, name in enumerate(names)}
+        if possible_edges is not None:
+            possible_edges.remove_edges_from(nx.selfloop_edges(possible_edges))
+            self.print_func("Converting possible edges to dense adjacency matrix")
+            self.possible_edges_adjacency = np.array(
+                nx.adjacency_matrix(possible_edges, nodelist=self.names).todense()
+            )
         self.possible_edges = possible_edges
         self.G = nx.DiGraph()
         self.G.add_nodes_from(names)
@@ -177,6 +181,8 @@ class GraphDiscovery:
         return new_graph
 
     def prepare_functions(self):
+        for kernel in self.kernels:
+            kernel.setup(self.X)
         self.interpolary_regression_find_gamma = jax.jit(
             jax.vmap(
                 interpolatory.perform_regression_and_find_gamma,
@@ -204,6 +210,9 @@ class GraphDiscovery:
             )
             for kernel in self.kernels
         }
+        self.remove_ancestors, self.remove_ancestors_no_adj = (
+            make_preprocessing_functions()
+        )
 
     def fit(
         self,
@@ -259,8 +268,6 @@ class GraphDiscovery:
         # running ancestor finding for each target
         key, *subkeys = random.split(key, len(targets) + 1)
 
-        gas = np.array(gas)
-        active_modess = np.array(active_modess)
         subkeys = np.array(subkeys)
 
         kernel_performance = self.get_kernel_performance(active_modess, gas, subkeys)
@@ -271,6 +278,8 @@ class GraphDiscovery:
 
         for i, kernel in enumerate(self.kernels):
             mask_kernel = chosen_kernels == i
+            if not np.any(mask_kernel):
+                continue
 
             (
                 active_modess_kernel,
@@ -309,8 +318,6 @@ class GraphDiscovery:
                 first_occurence_Z_high = np.argmax(
                     anomaly_Z_high, axis=1, keepdims=True
                 )
-                print(anomaly_noise)
-                print(noisess_kernel)
                 noisess_kernel = np.where(
                     np.logical_and(
                         np.arange(noisess_kernel.shape[1])[None, :]
@@ -377,24 +384,16 @@ class GraphDiscovery:
         - active_modes (Modes): the modes with the node with the given name deleted and all nodes that are not
                                 possible ancestors of the given node deleted
         """
-        gas = []
-        active_modes = []
-        for name in names:
-            ga = self.X[:, self.name_to_index[name]]
-            active_indexes = self.modes.delete_node_by_name(
-                name, self.modes.index_matrix
+        indexes = np.array([self.modes.name_to_index[name] for name in names])
+        gas = self.X[:, indexes].T
+        if self.possible_edges is None:
+            active_modes = self.remove_ancestors_no_adj(
+                self.modes.index_matrix, indexes
             )
-            if self.possible_edges is not None:
-                for possible_name in self.modes.names:
-                    if (
-                        possible_name not in self.possible_edges.predecessors(name)
-                        and possible_name != name
-                    ):
-                        active_indexes = self.modes.delete_node_by_name(
-                            possible_name, active_indexes
-                        )
-            active_modes.append(active_indexes)
-            gas.append(ga)
+        else:
+            active_modes = self.remove_ancestors(
+                self.possible_edges_adjacency, self.modes.index_matrix, indexes
+            )
         return gas, active_modes
 
     def get_kernel_performance(self, active_modess, gas, subkeys):

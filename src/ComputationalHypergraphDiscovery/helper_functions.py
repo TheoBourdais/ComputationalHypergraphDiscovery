@@ -6,6 +6,27 @@ from . import non_interpolatory
 from .Modes import kernels as kClass
 
 
+def make_preprocessing_functions():
+    def remove_non_ancestors_no_adj(modes, index):
+        non_ancestors_bool = np.arange(modes.shape[1]) == index
+        cluster_mask = (modes == 1) * non_ancestors_bool[None, :]
+        return np.where(cluster_mask, 0, modes)
+
+    def remove_non_ancestors(adj, modes, index):
+        non_ancestors_bool = adj[:, index] == 0
+        non_ancestors_bool = non_ancestors_bool.at[index].set(True)
+        cluster_mask = (modes == 1) * non_ancestors_bool[None, :]
+        return np.where(cluster_mask, 0, modes)
+
+    remove_non_ancestors = jax.vmap(
+        jax.jit(remove_non_ancestors), in_axes=(None, None, 0)
+    )
+    remove_non_ancestors_no_adj = jax.vmap(
+        jax.jit(remove_non_ancestors_no_adj), in_axes=(None, 0)
+    )
+    return remove_non_ancestors, remove_non_ancestors_no_adj
+
+
 def make_kernel_performance_function(kernels, gamma_min):
     is_interpolatory = np.array([kernel.is_interpolatory for kernel in kernels])
 
@@ -74,7 +95,7 @@ def make_activation_function(kernel, memory_efficient):
         energy = -np.dot(ga, yb)
         which_dim = np.sum(active_modes, axis=0)
         activations = activation_vmap(X, which_dim, active_modes, yb) / energy
-        activations = np.clip(activations, 0, None) / np.max(activations)
+        activations = np.clip(activations, 0, None) / np.maximum(np.max(activations), 1)
         return np.where(np.all(active_modes == 0, axis=1), 2.0, activations)
 
     return get_activations
@@ -89,7 +110,6 @@ def make_find_ancestor_function(kernel, gamma_min, memory_efficient=False):
         perform_regression = non_interpolatory.perform_regression
 
     def step(X, active_modes, ga, gamma, yb, key):
-
         activations = get_activations_func(X, yb, ga, active_modes)
         min_activation = np.argmin(activations)
         active_modes = active_modes.at[min_activation, :].set(0)
@@ -97,7 +117,6 @@ def make_find_ancestor_function(kernel, gamma_min, memory_efficient=False):
         yb, noise, Z_low, Z_high, gamma, key = perform_regression(
             K=mat, ga=ga, gamma=gamma, key=key, gamma_min=gamma_min
         )
-
         return (active_modes, yb, key, activations, noise, Z_low, Z_high)
 
     return jax.vmap(step, in_axes=(None, 0, 0, 0, 0, 0))

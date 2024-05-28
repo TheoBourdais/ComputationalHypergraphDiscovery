@@ -73,16 +73,13 @@ class LinearMode(ModeKernel):
     - name (str, optional): Name of the kernel. Defaults to None.
     """
 
-    def __init__(self, name=None) -> None:
+    def __init__(self, memory_efficient_required=False, name=None) -> None:
         self.hyperparameters = {}
         self._is_interpolatory = False
-        self._memory_efficient_required = False
+        self._memory_efficient_required = memory_efficient_required
         self.name = name if name is not None else "linear"
-        """def kernel(x,y,which_dim):
-            return 1+np.dot(x*which_dim,y)
-        #vmap kernel along x and y
-        self.kernel = jax.vmap(jax.vmap(kernel, in_axes=(None, 0, None)), in_axes=(0, None, None))"""
 
+    def setup(self, X):
         def vectorized_kernel(X, Y, which_dim):
             # factor of 2 is added for consistency with the quadratic kernel
             return 1 + 2 * jnp.dot(X * which_dim[None, :], Y.T)
@@ -119,20 +116,12 @@ class QuadraticMode(ModeKernel):
     - name (str, optional): Name of the kernel. Defaults to None.
     """
 
-    def __init__(self, name=None) -> None:
+    def __init__(self, memory_efficient_required=False, name=None) -> None:
         self._is_interpolatory = False
         self.name = name if name is not None else "quadratic"
-        self._memory_efficient_required = False
-        """def kernel(x,y,which_dim):
-            return (1+np.dot(x*which_dim,y))**2
-        def kernel_only_var(x,y,which_dim,which_dim_only):
-            return (1+np.dot(x*which_dim,y))*(1+np.dot(x*which_dim_only,y))
+        self._memory_efficient_required = memory_efficient_required
 
-        #vmap kernel along x and y
-        self.kernel = jax.vmap(jax.vmap(kernel, in_axes=(None, 0, None)), in_axes=(0, None, None))
-        self.kernel_only_var=jax.vmap(jax.vmap(kernel_only_var, in_axes=(None, 0, None, None)), in_axes=(0, None, None, None))
-"""
-
+    def setup(self, X):
         def vectorized_kernel(X, Y, which_dim):
             return (1 + jnp.dot(X * which_dim[None, :], Y.T)) ** 2
 
@@ -175,67 +164,42 @@ class GaussianMode(ModeKernel):
 
     """
 
-    def __init__(self, l, name=None) -> None:
+    def __init__(self, l, memory_efficient_required=True, name=None) -> None:
         self._l = l
         self._is_interpolatory = True
-        self._memory_efficient_required = False
+        self._memory_efficient_required = memory_efficient_required
         self.name = name if name is not None else "gaussian"
 
         self.quadratic_part = QuadraticMode()
 
-        """def k(X, Y, which_dim):
-            exps = self.vmaped_gaussian_exp(X, Y)
-            # print(exps.shape)
-            return self.quadratic_part(X, Y, which_dim) + jnp.prod(
-                1 + exps, axis=2, where=which_dim
-            )"""
+    def setup(self, X):
+        self.quadratic_part.setup(X)
 
-        def k_indiv(x, y, which_dim):
-            exp = jnp.exp(-((x * which_dim - y * which_dim) ** 2) / (2 * self.l**2))
-            return jnp.prod(1 + exp)
+        def gaussian_exp(x, y):
+            return jnp.exp(-((x - y) ** 2) / (2 * self.l**2))
 
-        k_indiv_mapped = jax.vmap(k_indiv, in_axes=(0, None, None))
-        k_indiv_mapped = jax.vmap(k_indiv_mapped, in_axes=(None, 0, None))
+        self.exps = jax.vmap(
+            jax.vmap(gaussian_exp, in_axes=(0, None)), in_axes=(None, 0)
+        )(X, X)
 
         def k(X, Y, which_dim):
-            return k_indiv_mapped(X, Y, which_dim) + self.quadratic_part(
-                X, Y, which_dim
+            return (
+                jnp.prod(1 + which_dim[None, None, :] * self.exps, axis=2)
+                + self.quadratic_part(X, Y, which_dim)
+                - 1
             )
 
         self.kernel = k
 
-        """def k_only_var(X, Y, which_dim, which_dim_only):
-            exps = self.vmaped_gaussian_exp(X, Y)
-
-            rest = which_dim * (1 - which_dim_only)
-
-            exps_only = jnp.prod(exps, axis=2, where=which_dim_only)
-            exps_rest = jnp.prod(1 + exps, axis=2, where=rest)
-            return (
-                self.quadratic_part.individual_influence(
-                    X, Y, which_dim, which_dim_only
-                )
-                + exps_only * exps_rest
-            )"""
-
-        def k_only_var_indiv(x, y, which_dim, which_dim_only):
-            exp_only = jnp.exp(
-                -((x * which_dim_only - y * which_dim_only) ** 2) / (2 * self.l**2)
-            )
-            rest = which_dim * (1 - which_dim_only)
-            return jnp.prod(exp_only) * k_indiv(x, y, rest)
-
-        k_only_var_indiv_mapped = jax.vmap(
-            k_only_var_indiv, in_axes=(0, None, None, None)
-        )
-        k_only_var_indiv_mapped = jax.vmap(
-            k_only_var_indiv_mapped, in_axes=(None, 0, None, None)
-        )
-
         def k_only_var(X, Y, which_dim, which_dim_only):
             return self.quadratic_part.individual_influence(
                 X, Y, which_dim, which_dim_only
-            ) + k_only_var_indiv_mapped(X, Y, which_dim, which_dim_only)
+            ) + jnp.prod(
+                1
+                - which_dim_only[None, None, :]
+                + which_dim[None, None, :] * self.exps,
+                axis=2,
+            )
 
         self.kernel_only_var = k_only_var
 
@@ -254,10 +218,6 @@ class GaussianMode(ModeKernel):
         - np.array: The influence of each data point on the prediction.
         """
         return self.kernel_only_var(X, Y, which_dim, which_dim_only)
-
-    def activation(self, X, which_dim, which_dim_only, yb):
-        exps = self.vmaped_gaussian_exp(X, X)
-        activations = jnp.einsum("ni,nj,ijk->nk", yb, yb, exps)
 
     @property
     def l(self):
