@@ -398,10 +398,12 @@ class GraphDiscovery:
 
     def get_kernel_performance(self, active_modess, gas, subkeys):
         kernel_performance = []
+
         for kernel in self.kernels:
             K_mat = self.vmaped_kernel[kernel](
                 self.X, self.X, np.sum(active_modess, axis=1)
             )
+
             if kernel.is_interpolatory:
                 res = self.interpolary_regression_find_gamma(
                     K_mat, gas, self.gamma_min, subkeys
@@ -410,6 +412,13 @@ class GraphDiscovery:
                 res = self.non_interpolatory_regression_find_gamma(
                     K_mat, gas, self.gamma_min, subkeys
                 )
+            if np.isnan(res[1]).any():
+                error_message = "The regression has returned NaNs, this is likely due to the kernel matrix not being positive definite\n"
+                error_message += "See the spectrum below for confirmation. Consider increasing gamma_min\n"
+                error_message += (
+                    f"{np.linalg.eigvalsh(K_mat[np.argmax(np.isnan(res[1]))])}"
+                )
+                raise ValueError(error_message)
             kernel_performance.append(res)
         kernel_performance = tuple(
             np.stack([k_perf[i] for k_perf in kernel_performance], axis=1)
@@ -564,22 +573,23 @@ class GraphDiscovery:
             )
             for i, kernel in enumerate(self.kernels):
                 self.print_func(
-                    f"Kernel [{kernel}] has n/(n+s)={noises_kernel[i]}, Z=({Z_lows_kernels[i]:.2f}, {Z_highs_kernels[i]:.2f}), gamma={gammas_kernel[i]:.2e}"
+                    f"Kernel [{kernel}] has n/(n+s)={noises_kernel[i]}, Z=({Z_lows_kernels[i]:.2f}, {Z_highs_kernels[i]:.2f}), gamma={max(self.gamma_min,gammas_kernel[i]):.2e}"
                 )
 
             if chosen_kernel == -1:  # case no ancestors, step 7 in the paper
                 self.print_func(f"{name} has no ancestors\n")
                 index += 1
                 continue
-            self.print_func(
-                f"{name} has ancestors with the kernel [{self.kernels[chosen_kernel]}] | (n/(s+n)={noises_kernel[0]:.2f})"
-            )
+
             chosen_mode = chosen_modes[index]
             ancestor_modes = ancestor_modess[index]
             noises = noisess[index]
             Z_low = Z_lows[index]
             Z_high = Z_highs[index]
             activations = activationss[index]
+            self.print_func(
+                f"{name} has ancestors with the kernel [{self.kernels[chosen_kernel]}] | (n/(s+n)={float(noisess[index][chosen_mode]):.2f} after pruning)"
+            )
 
             # plot evolution of noise and Z, and in second plot on the side evolution of Z_{k+1}-Z_k
             ancestor_number = [np.sum(mode) for mode in ancestor_modes]

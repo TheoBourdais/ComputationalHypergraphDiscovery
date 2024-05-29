@@ -67,9 +67,23 @@ def make_kernel_performance_function(kernels, gamma_min):
 
 def make_activation_function(kernel, memory_efficient):
 
-    def activation(X, which_dim, which_dim_only, yb):
+    def non_zero_activation(X, which_dim, which_dim_only, yb):
         mat = kernel.individual_influence(X, X, which_dim, which_dim_only)
         return np.dot(yb, mat @ yb)
+
+    def zero_activation(X, which_dim, which_dim_only, yb):
+        return 0.0
+
+    def activation(X, which_dim, which_dim_only, yb):
+        return jax.lax.cond(
+            np.any(which_dim_only),
+            non_zero_activation,
+            zero_activation,
+            X,
+            which_dim,
+            which_dim_only,
+            yb,
+        )
 
     if not memory_efficient:
         activation_vmap = jax.vmap(activation, in_axes=(None, None, 0, None))

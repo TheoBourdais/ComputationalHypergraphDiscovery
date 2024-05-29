@@ -5,7 +5,7 @@ import jax
 
 
 def perform_regression_and_find_gamma(K, ga, gamma_min, key):
-    gamma = find_gamma(K=K, Y=ga, gamma_min=gamma_min)
+    gamma = find_gamma(K=K, Y=ga)
     return perform_regression(K=K, ga=ga, gamma=gamma, gamma_min=gamma_min, key=key)
 
 
@@ -33,10 +33,11 @@ def perform_regression(K, ga, gamma, gamma_min, key):
     - gamma (float): The gamma value used for the regression.
 
     """
-    cho_factor = jax_linalg.cho_factor(K + gamma * np.eye(K.shape[0]))
+    gamma_used = jax.lax.max(gamma, gamma_min)
+    cho_factor = jax_linalg.cho_factor(K + gamma_used * np.eye(K.shape[0]))
 
-    yb, noise = solve_variationnal(ga=ga, gamma=gamma, cho_factor=cho_factor)
-    Z_low, Z_high, key = Z_test(gamma=gamma, cho_factor=cho_factor, key=key)
+    yb, noise = solve_variationnal(ga=ga, gamma=gamma_used, cho_factor=cho_factor)
+    Z_low, Z_high, key = Z_test(gamma=gamma_used, cho_factor=cho_factor, key=key)
     return yb, noise, Z_low, Z_high, gamma, key
 
 
@@ -81,7 +82,7 @@ def Z_test(gamma, cho_factor, key):
     return B_samples[int(0.05 * N)], B_samples[int(0.95 * N)], key
 
 
-def find_gamma(K, Y, gamma_min):
+def find_gamma(K, Y):
     """
     Finds the gamma value for regression problem as the residuals of the regression problem
 
@@ -98,6 +99,5 @@ def find_gamma(K, Y, gamma_min):
     """
     residuals = np.linalg.lstsq(K, Y, rcond=None)[1]
     gamma = np.sum(residuals)
-    gamma = jax.lax.max(gamma, gamma_min)
 
     return gamma

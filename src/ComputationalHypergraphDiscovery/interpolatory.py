@@ -33,16 +33,14 @@ def perform_regression_and_find_gamma(K, ga, gamma_min, key):
 
     """
     eigenvalues, eigenvectors = np.linalg.eigh(K)
-    gamma = find_gamma(
-        eigenvalues=eigenvalues,
-        gamma_min=gamma_min,
-    )
+    gamma = find_gamma(eigenvalues=eigenvalues)
     # eigenvalues += gamma
+    gamma_used = jax.lax.max(gamma, gamma_min)
 
     yb, noise = solve_variationnal(
-        ga, gamma=gamma, eigenvalues=eigenvalues, eigenvectors=eigenvectors
+        ga, gamma=gamma_used, eigenvalues=eigenvalues, eigenvectors=eigenvectors
     )
-    Z_low, Z_high, key = Z_test(gamma, eigenvalues, eigenvectors, key)
+    Z_low, Z_high, key = Z_test(gamma_used, eigenvalues, eigenvectors, key)
 
     return yb, noise, Z_low, Z_high, gamma, key
 
@@ -94,7 +92,7 @@ def Z_test(gamma, eigenvalues, eigenvectors, key):
     return B_samples[int(0.05 * N)], B_samples[int(0.95 * N)], key
 
 
-def find_gamma(eigenvalues, gamma_min):
+def find_gamma(eigenvalues):
     """
     Finds the gamma value for regression problem by maximising the variance of the eigenvalues of gamma*(K+gamma*I)^-1
 
@@ -126,8 +124,5 @@ def find_gamma(eigenvalues, gamma_min):
         lambda _: gamma_med,
         operand=None,
     )
-
-    # Ensure gamma is not below the minimum
-    gamma = jax.lax.max(gamma, gamma_min)
 
     return gamma
