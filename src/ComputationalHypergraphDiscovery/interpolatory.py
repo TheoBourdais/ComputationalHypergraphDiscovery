@@ -109,7 +109,7 @@ def find_gamma(eigenvalues):
     """
 
     def eigenvalue_variance(gamma_log):
-        return -np.var(1 / (1 + eigenvalues * np.exp(-gamma_log)))
+        return -np.var(1 / (1 + np.clip(eigenvalues, min=0) * np.exp(-gamma_log)))
 
     res = minimize(
         eigenvalue_variance,
@@ -124,5 +124,6 @@ def find_gamma(eigenvalues):
         lambda _: gamma_med,
         operand=None,
     )
+    gamma = jax.lax.max(gamma, 2 * np.min(np.clip(eigenvalues, max=0)))
 
     return gamma

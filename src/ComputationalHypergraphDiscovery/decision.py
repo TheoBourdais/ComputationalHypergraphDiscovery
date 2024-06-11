@@ -2,6 +2,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 from .util import plot_noise_evolution
 import jax.numpy as np
+import jax
 
 
 class KernelChooser:
@@ -120,7 +121,7 @@ class ModeChooser:
     def __init__(self):
         pass
 
-    def is_a_modeChooser(self):
+    def is_a_mode_chooser(self):
         return True
 
     def __call__(self, *args: Any, **kwds: Any) -> Any:
@@ -182,8 +183,13 @@ class ThresholdModeChooser(ModeChooser):
         Raises:
         - Exception: If no mode is found with a noise level below the threshold.
         """
-        valid_indices = np.where(list_of_noises < self.threshold)
-        return np.min(valid_indices)
+        is_under_threshold = list_of_noises < self.threshold
+        valid_indices = np.where(
+            is_under_threshold, np.arange(list_of_noises.shape[0]), -1
+        )
+        return jax.lax.select(
+            np.any(is_under_threshold), np.max(valid_indices), np.argmin(list_of_noises)
+        )
 
 
 class EarlyStopping:

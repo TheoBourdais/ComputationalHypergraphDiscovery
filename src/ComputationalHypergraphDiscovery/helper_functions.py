@@ -115,15 +115,18 @@ def make_activation_function(kernel, memory_efficient):
     return get_activations
 
 
-def make_find_ancestor_function(kernel, gamma_min, memory_efficient=False):
+def make_find_ancestor_function(kernel, is_interpolatory=None, memory_efficient=False):
 
     get_activations_func = make_activation_function(kernel, memory_efficient)
-    if kernel.is_interpolatory:
+    interpolatory_bool = (
+        kernel.is_interpolatory if is_interpolatory is None else is_interpolatory
+    )
+    if interpolatory_bool:
         perform_regression = interpolatory.perform_regression
     else:
         perform_regression = non_interpolatory.perform_regression
 
-    def step(X, active_modes, ga, gamma, yb, key):
+    def step(X, active_modes, ga, gamma, yb, key, gamma_min):
         activations = get_activations_func(X, yb, ga, active_modes)
         min_activation = np.argmin(activations)
         active_modes = active_modes.at[min_activation, :].set(0)
@@ -131,9 +134,9 @@ def make_find_ancestor_function(kernel, gamma_min, memory_efficient=False):
         yb, noise, Z_low, Z_high, gamma, key = perform_regression(
             K=mat, ga=ga, gamma=gamma, key=key, gamma_min=gamma_min
         )
-        return (active_modes, yb, key, activations, noise, Z_low, Z_high)
+        return (active_modes, yb, gamma, key, activations, noise, Z_low, Z_high)
 
-    return jax.vmap(step, in_axes=(None, 0, 0, 0, 0, 0))
+    return jax.vmap(step, in_axes=(None, 0, 0, 0, 0, 0, 0))
 
 
 def make_for_loop_function(get_activations_func, chosen_kernel, perform_regression):

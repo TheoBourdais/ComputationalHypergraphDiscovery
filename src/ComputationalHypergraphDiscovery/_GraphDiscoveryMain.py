@@ -85,8 +85,12 @@ class GraphDiscovery:
             )
 
         if normalize:
-            self.X = (X - X.mean(axis=0, keepdims=True)) / standard_devs
+            self.mean_x = X.mean(axis=0, keepdims=True)
+            self.std_x = standard_devs
+            self.X = (X - self.mean_x) / self.std_x
         else:
+            self.mean_x = np.zeros((1, X.shape[1]))
+            self.std_x = np.ones((1, X.shape[1]))
             self.X = X
         self.print_func = print if verbose else lambda *a, **k: None
         self.names = names
@@ -111,7 +115,7 @@ class GraphDiscovery:
             ), "Kernels must have different names"
         self._kernels = kernels
         self.gamma_min = gamma_min
-        self.prepare_functions()
+        self.prepare_functions(is_interpolatory=None)
 
     @property
     def kernels(self):
@@ -180,19 +184,19 @@ class GraphDiscovery:
         new_graph.G.remove_edges_from(edges_to_remove)
         return new_graph
 
-    def prepare_functions(self):
+    def prepare_functions(self, is_interpolatory=None):
         for kernel in self.kernels:
             kernel.setup(self.X)
         self.interpolary_regression_find_gamma = jax.jit(
             jax.vmap(
                 interpolatory.perform_regression_and_find_gamma,
-                in_axes=(0, 0, None, 0),
+                in_axes=(0, 0, 0, 0),
             )
         )
         self.non_interpolatory_regression_find_gamma = jax.jit(
             jax.vmap(
                 non_interpolatory.perform_regression_and_find_gamma,
-                in_axes=(0, 0, None, 0),
+                in_axes=(0, 0, 0, 0),
             )
         )
         apply_kernel = lambda k, X, Y, which_dim: k(X, Y, which_dim)
@@ -204,8 +208,8 @@ class GraphDiscovery:
             kernel: jax.jit(
                 make_find_ancestor_function(
                     kernel,
-                    gamma_min=self.gamma_min,
                     memory_efficient=kernel.memory_efficient_required,
+                    is_interpolatory=is_interpolatory,
                 )
             )
             for kernel in self.kernels
@@ -223,6 +227,7 @@ class GraphDiscovery:
         early_stopping=None,
         jit_all=True,
         vmap=True,
+        message="",
     ):
         """
         Performs graph discovery. You can provide a list of targets (nodes of the graph) to discover ancestors of these targets. If None, the ancestors of all nodes are discovered.
@@ -287,7 +292,9 @@ class GraphDiscovery:
                 Z_lows_kernel,
                 Z_highs_kernel,
                 activationss_kernel,
-            ) = GraphDiscovery.prune_ancestors(
+                gammas_kernel,
+                ybs_kernel,
+            ) = self.prune_ancestors(
                 kernel,
                 self.ancestor_finding_step_funcs,
                 X=self.X,
@@ -300,6 +307,7 @@ class GraphDiscovery:
                 Z_low_kernel=Z_lows[mask_kernel],
                 Z_high_kernel=Z_highs[mask_kernel],
                 loop_number=len(self.modes.clusters) - 2,
+                message=message,
             )
             anomaly_noise = np.logical_or(noisess_kernel > 1.05, noisess_kernel < -0.05)
             anomaly_Z_low = np.logical_or(Z_lows_kernel > 1.05, Z_lows_kernel < -0.05)
@@ -362,6 +370,8 @@ class GraphDiscovery:
                 Z_highs_kernel,
                 activationss_kernel,
                 kernel_performance,
+                gammas_kernel,
+                ybs_kernel,
             )
         self.process_results(
             targets,
@@ -369,6 +379,8 @@ class GraphDiscovery:
             chosen_kernels == -1,
             *([None] * 6),
             kernel_performance,
+            None,
+            None,
         )
 
     def _prepare_modes_for_ancestor_finding(self, names):
@@ -403,14 +415,16 @@ class GraphDiscovery:
             K_mat = self.vmaped_kernel[kernel](
                 self.X, self.X, np.sum(active_modess, axis=1)
             )
+            min_eigenvalue = np.min(np.linalg.eigvalsh(K_mat), axis=1)
+            gamma_mins = np.where(min_eigenvalue + 1e-9 < 0, -2 * min_eigenvalue, 1e-9)
 
             if kernel.is_interpolatory:
                 res = self.interpolary_regression_find_gamma(
-                    K_mat, gas, self.gamma_min, subkeys
+                    K_mat, gas, gamma_mins, subkeys
                 )
             else:
                 res = self.non_interpolatory_regression_find_gamma(
-                    K_mat, gas, self.gamma_min, subkeys
+                    K_mat, gas, gamma_mins, subkeys
                 )
             if np.isnan(res[1]).any():
                 error_message = "The regression has returned NaNs, this is likely due to the kernel matrix not being positive definite\n"
@@ -456,6 +470,7 @@ class GraphDiscovery:
         return ybs, gammas, subkeys, noisess, Z_lows, Z_highs, chosen_kernels
 
     def prune_ancestors(
+        self,
         kernel,
         ancestor_finding_step_funcs,
         X,
@@ -468,12 +483,15 @@ class GraphDiscovery:
         Z_low_kernel,
         Z_high_kernel,
         loop_number,
+        message,
     ):
 
         ancestor_modess = [np.sum(active_modess_kernel, axis=1)]
         noisess_kernel = [noise_kernel]
         Z_lows_kernel = [Z_low_kernel]
         Z_highs_kernel = [Z_high_kernel]
+        gammas = [gammas_kernel]
+        ybs = [ybs_kernel]
         activationss_kernel = []
 
         pbar = tqdm(
@@ -482,11 +500,40 @@ class GraphDiscovery:
             position=0,
             leave=True,
         )
+        pbar.set_postfix_str(message)
         ancestor_finding_step = ancestor_finding_step_funcs[kernel]
         for step in range(loop_number):
+            """p = X.shape[1] - step - 1
+            if not has_changed and (p * (p + 1)) / 2 < X.shape[1]:
+                has_changed = True
+                ancestor_finding_step = jax.jit(
+                    make_find_ancestor_function(
+                        kernel,
+                        gamma_min=self.gamma_min,
+                        memory_efficient=kernel.memory_efficient_required,
+                        is_interpolatory=False,
+                    )
+                )
+                K_mat = self.vmaped_kernel[kernel](
+                    self.X, self.X, np.sum(active_modess_kernel, axis=1)
+                )
+                res = self.non_interpolatory_regression_find_gamma(
+                    K_mat, gas_kernel, self.gamma_min, subkeys_kernel
+                )
+                ybs_kernel, _, _, _, gammas_kernel, subkeys_kernel = res"""
+            if step % 50 == 0:
+                K_mat = self.vmaped_kernel[kernel](
+                    self.X, self.X, np.sum(active_modess_kernel, axis=1)
+                )
+                min_eigenvalue = np.linalg.eigvalsh(K_mat)[:, 0]
+                gamma_min_kernel = np.where(
+                    min_eigenvalue + 1e-9 < 0, -2 * min_eigenvalue, 1e-9
+                )
+
             (
                 active_modess_kernel,
                 ybs_kernel,
+                gammas_kernel,
                 subkeys_kernel,
                 activations,
                 noise,
@@ -499,22 +546,26 @@ class GraphDiscovery:
                 gammas_kernel,
                 ybs_kernel,
                 subkeys_kernel,
+                gamma_min_kernel,
             )
             ancestor_modess.append(np.sum(active_modess_kernel, axis=1))
             noisess_kernel.append(noise)
             Z_lows_kernel.append(Z_low)
             Z_highs_kernel.append(Z_high)
             activationss_kernel.append(activations)
+            gammas.append(gammas_kernel)
+            ybs.append(ybs_kernel)
 
             pbar.update(1)
         pbar.close()
-
         return (
             np.stack(ancestor_modess, axis=1),
             np.stack(noisess_kernel, axis=1),
             np.stack(Z_lows_kernel, axis=1),
             np.stack(Z_highs_kernel, axis=1),
             np.stack(activationss_kernel, axis=1),
+            np.stack(gammas, axis=1),
+            np.stack(ybs, axis=1),
         )
 
     def process_results(
@@ -529,6 +580,8 @@ class GraphDiscovery:
         Z_highs,
         activationss,
         kernel_performances,
+        gammas,
+        ybs_kernel,
     ):
         """
         Finds ancestors of a given node in the graph. This method is called by the fit method.
@@ -555,7 +608,6 @@ class GraphDiscovery:
         """
 
         index = 0
-
         for (
             name,
             mask,
@@ -587,6 +639,8 @@ class GraphDiscovery:
             Z_low = Z_lows[index]
             Z_high = Z_highs[index]
             activations = activationss[index]
+            gamma = gammas[index, chosen_mode]
+            yb = ybs_kernel[index, chosen_mode]
             self.print_func(
                 f"{name} has ancestors with the kernel [{self.kernels[chosen_kernel]}] | (n/(s+n)={float(noisess[index][chosen_mode]):.2f} after pruning)"
             )
@@ -600,24 +654,29 @@ class GraphDiscovery:
                 node_name=name,
                 ancestor_modes_number=ancestor_number[chosen_mode],
             )
+            fig.savefig(f"./results/noise_evolution_{name}.png")
 
             # adding ancestors to graph and storing activations (step 19)
             acivation_per_variable = np.sum(
                 self.modes.index_matrix * activations[chosen_mode][:, None], axis=0
             )
             active_variables = ancestor_modes[chosen_mode]
+            self.G.nodes[name].update(
+                {
+                    "active_modes": active_variables,
+                    "kernel_index": chosen_kernel,
+                    "type": str(self.kernels[chosen_kernel]),
+                    "gamma": float(gamma),
+                    "coeff": yb,
+                }
+            )
             ancestor_names = []
             for i, (activation, active) in enumerate(
                 zip(acivation_per_variable, active_variables)
             ):
                 if active == 1:
                     ancestor_names.append(self.names[i])
-                    self.G.add_edge(
-                        self.names[i],
-                        name,
-                        type=str(self.kernels[chosen_kernel]),
-                        signal=activation,
-                    )
+                    self.G.add_edge(self.names[i], name, signal=activation)
                 elif active == 0:
                     continue
                 else:
@@ -741,3 +800,43 @@ class GraphDiscovery:
                 self.G, pos, edge_labels=nx.get_edge_attributes(self.G, "type")
             )
         plt.xlim(x_min - x_margin, x_max + x_margin)
+
+    def predict(self, names, X_pred):
+        assert X_pred.shape[1] == self.X.shape[1]
+        res = np.zeros((X_pred.shape[0], len(names)))
+
+        # apply mean and std transform
+        X_pred_used = (X_pred - self.mean_x) / self.std_x
+
+        k_dic = nx.get_node_attributes(self.G, "kernel_index")
+        kernels = np.array([k_dic.get(name, -1) for name in names])
+        active_mode_dic = nx.get_node_attributes(self.G, "active_modes")
+        active_modess = np.stack(
+            [
+                active_mode_dic.get(
+                    name,
+                    np.zeros(
+                        self.X.shape[1],
+                    ),
+                )
+                for name in names
+            ],
+            axis=0,
+        )
+        yb_dic = nx.get_node_attributes(self.G, "coeff")
+        ybs = np.stack(
+            [yb_dic.get(name, np.zeros(self.X.shape[0])) for name in names], axis=0
+        )
+
+        for i, kernel in enumerate(self.kernels):
+            mask = kernels == i
+            if not np.any(mask):
+                continue
+            K_mat = self.vmaped_kernel[kernel](X_pred_used, self.X, active_modess[mask])
+            pred = np.einsum("nij,nj->in", K_mat, -ybs[mask])
+            res = res.at[:, mask].set(pred)
+        # transform the result back
+        indexes = np.array([self.name_to_index[name] for name in names])
+        res = res * self.std_x[:, indexes] + self.mean_x[:, indexes]
+
+        return res
