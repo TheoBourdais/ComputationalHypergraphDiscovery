@@ -183,7 +183,7 @@ class ModeKernel:
         assert isinstance(other, float) or isinstance(
             other, int
         ), "multiplication only defined with scalars"
-        assert other > 0, "multiplication only defined with positive scalars"
+        assert other >= 0, "multiplication only defined with positive scalars"
         new_kernel = copy(self)
         new_kernel.hyperparameters = new_kernel.hyperparameters.copy()
         new_kernel.hyperparameters["beta_scale"] = self.beta_scale * other
