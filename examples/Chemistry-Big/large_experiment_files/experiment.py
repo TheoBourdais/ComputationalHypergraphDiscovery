@@ -30,7 +30,7 @@ def main():
     targets = list(pd.read_csv("batches.csv").iloc[args.run_index])
     targets = [t for t in targets if t == t]
 
-    df = pd.read_csv("./BCR_uniform.csv")
+    df = pd.read_csv("./data_and_results/BCR_uniform.csv")
     df = df[df.columns[df.std(axis=0) != 0]]
     df = df[list(df.columns[:1122]) + targets]
     cut = 600
@@ -61,7 +61,7 @@ def main():
         message=f"experiment {args.device}_{args.run_index}",
     )
     # save graph_discovery.G with name that uses time and run name
-    save_name = f"./results/G_{args.device}_{args.run_index}.pkl"
+    save_name = f"./data_and_results/results/G_{args.device}_{args.run_index}.pkl"
 
     pickle.dump(graph_discovery.G, open(save_name, "wb"))
 
