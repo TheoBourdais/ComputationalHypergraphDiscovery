@@ -37,21 +37,6 @@ def worker(device_id, queue):
 
 
 def main():
-    """to_analyze = list(pd.read_csv("./BCR_uniform.csv").columns[1122:])
-    random.seed(42)
-    random.shuffle(to_analyze)
-
-    batch_size = 1
-    to_analyze_batches = [
-        list(to_analyze[i : i + batch_size])
-        for i in range(0, len(to_analyze), batch_size)
-    ]
-    to_analyze_batches[-1] = to_analyze_batches[-1][
-        : len(to_analyze_batches) % batch_size
-    ]
-    df_batches = pd.DataFrame(to_analyze_batches)
-    df_batches.columns = [f"target {i}" for i in range(1, batch_size + 1)]
-    df_batches.to_csv("batches.csv", index=False)"""
     df_batches = pd.read_csv("batches.csv")
     num_devices = 3
     max_scripts_per_device = 1

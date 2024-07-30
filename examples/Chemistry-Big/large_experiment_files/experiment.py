@@ -15,13 +15,7 @@ def main():
 
     # preallocate 95% of GPU memory
     os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.95"
-    """os.environ["XLA_FLAGS"] = (
-        "--xla_gpu_enable_triton_softmax_fusion=true "
-        "--xla_gpu_triton_gemm_any=True "
-        #'--xla_gpu_enable_async_collectives=true '
-        "--xla_gpu_enable_latency_hiding_scheduler=true "
-        "--xla_gpu_enable_highest_priority_async_stream=true "
-    )"""
+
     import jax
     import pickle
     import pandas as pd
@@ -51,7 +45,6 @@ def main():
                 edges.append((f_node, nf_node))
                 edges.append((nf_node, f_node))
     possible_edges.add_edges_from(edges)
-    # possible_edges = pickle.load(open("./BCR.pkl", "rb"))
 
     graph_discovery = CHD.GraphDiscovery.from_dataframe(
         df_train,
@@ -59,7 +52,6 @@ def main():
         possible_edges=possible_edges,
         kernels=[CHD.Modes.QuadraticMode(memory_efficient_required=True)],
         gamma_min=2e-6,
-        # device=jax.devices()[args.device],
     )
     mode_chooser = CHD.decision.ThresholdModeChooser(threshold=0.025)
     print(f"pruning {targets}")
@@ -67,7 +59,6 @@ def main():
         targets,
         mode_chooser=mode_chooser,
         message=f"experiment {args.device}_{args.run_index}",
-        # device=jax.devices()[args.device],
     )
     # save graph_discovery.G with name that uses time and run name
     save_name = f"./results/G_{args.device}_{args.run_index}.pkl"
