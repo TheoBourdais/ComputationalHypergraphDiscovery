@@ -499,6 +499,8 @@ class GraphDiscovery:
         pbar.set_postfix_str(message)
         ancestor_finding_step = ancestor_finding_step_funcs[kernel]
         for step in range(loop_number):
+            # because of the very high number of ancestor, gamma_min needs to be recomputed often, to avoid numerical instability
+            # and keep it as small as possible
             p = X.shape[1] - step - 1
             if step % 50 == 0 or (p * (p + 1)) / 2 == X.shape[1]:
                 K_mat = self.vmaped_kernel[kernel](
