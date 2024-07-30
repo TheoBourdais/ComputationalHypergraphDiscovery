@@ -46,7 +46,7 @@ class MinNoiseKernelChooser(KernelChooser):
         ybs, noises, Z_lows, Z_highs, gammas, keys = kernel_perfs
 
         # Create a mask for conditions where noise is less than Z_low
-        valid_indices = noises < Z_lows
+        valid_indices = noises < 2  # Z_lows
         is_valid = np.any(valid_indices)
 
         # Use jnp.where to find the first valid index, default to -1 if no valid index

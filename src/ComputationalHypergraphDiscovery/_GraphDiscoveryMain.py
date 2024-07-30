@@ -408,7 +408,9 @@ class GraphDiscovery:
             )
         return gas, active_modes
 
-    def get_kernel_performance(self, active_modess, gas, subkeys):
+    def get_kernel_performance(
+        self, active_modess, gas, subkeys, use_interpolatory=None
+    ):
         kernel_performance = []
 
         for kernel in self.kernels:
@@ -417,8 +419,12 @@ class GraphDiscovery:
             )
             min_eigenvalue = np.min(np.linalg.eigvalsh(K_mat), axis=1)
             gamma_mins = np.where(min_eigenvalue + 1e-9 < 0, -2 * min_eigenvalue, 1e-9)
-
-            if kernel.is_interpolatory:
+            interpolatory_bool = (
+                kernel.is_interpolatory
+                if use_interpolatory is None
+                else use_interpolatory
+            )
+            if interpolatory_bool:
                 res = self.interpolary_regression_find_gamma(
                     K_mat, gas, gamma_mins, subkeys
                 )
@@ -503,13 +509,21 @@ class GraphDiscovery:
         pbar.set_postfix_str(message)
         ancestor_finding_step = ancestor_finding_step_funcs[kernel]
         for step in range(loop_number):
-            """p = X.shape[1] - step - 1
-            if not has_changed and (p * (p + 1)) / 2 < X.shape[1]:
+            p = X.shape[1] - step - 1
+            if step % 50 == 0 or (p * (p + 1)) / 2 == X.shape[1]:
+                K_mat = self.vmaped_kernel[kernel](
+                    self.X, self.X, np.sum(active_modess_kernel, axis=1)
+                )
+
+                min_eigenvalue = np.linalg.eigvalsh(K_mat)[:, 0]
+                gamma_min_kernel = np.where(
+                    min_eigenvalue + 1e-9 < 0, -2 * min_eigenvalue, 1e-9
+                )
+            """if not has_changed and (p * (p + 1)) / 2 < X.shape[1]:
                 has_changed = True
                 ancestor_finding_step = jax.jit(
                     make_find_ancestor_function(
                         kernel,
-                        gamma_min=self.gamma_min,
                         memory_efficient=kernel.memory_efficient_required,
                         is_interpolatory=False,
                     )
@@ -518,17 +532,9 @@ class GraphDiscovery:
                     self.X, self.X, np.sum(active_modess_kernel, axis=1)
                 )
                 res = self.non_interpolatory_regression_find_gamma(
-                    K_mat, gas_kernel, self.gamma_min, subkeys_kernel
+                    K_mat, gas_kernel, gamma_min_kernel, subkeys_kernel
                 )
                 ybs_kernel, _, _, _, gammas_kernel, subkeys_kernel = res"""
-            if step % 50 == 0:
-                K_mat = self.vmaped_kernel[kernel](
-                    self.X, self.X, np.sum(active_modess_kernel, axis=1)
-                )
-                min_eigenvalue = np.linalg.eigvalsh(K_mat)[:, 0]
-                gamma_min_kernel = np.where(
-                    min_eigenvalue + 1e-9 < 0, -2 * min_eigenvalue, 1e-9
-                )
 
             (
                 active_modess_kernel,
@@ -555,8 +561,9 @@ class GraphDiscovery:
             activationss_kernel.append(activations)
             gammas.append(gammas_kernel)
             ybs.append(ybs_kernel)
-
             pbar.update(1)
+            if np.all(active_modess_kernel == 0):
+                break
         pbar.close()
         return (
             np.stack(ancestor_modess, axis=1),
@@ -647,6 +654,15 @@ class GraphDiscovery:
 
             # plot evolution of noise and Z, and in second plot on the side evolution of Z_{k+1}-Z_k
             ancestor_number = [np.sum(mode) for mode in ancestor_modes]
+            # save data
+            np.save(f"./results/noise_evolution_{name}.npy", noises)
+            np.save(f"./results/Z_low_evolution_{name}.npy", Z_low)
+            np.save(f"./results/Z_high_evolution_{name}.npy", Z_high)
+            np.save(f"./results/activations_{name}.npy", activations)
+            np.save(f"./results/ancestor_modes_{name}.npy", ancestor_modes)
+            np.save(f"./results/ancestor_number_{name}.npy", ancestor_number)
+            np.save(f"./results/gamma_{name}.npy", gammas)
+
             fig, axes = plot_noise_evolution(
                 ancestor_number,
                 noises,
@@ -654,7 +670,9 @@ class GraphDiscovery:
                 node_name=name,
                 ancestor_modes_number=ancestor_number[chosen_mode],
             )
+            plt.show()
             fig.savefig(f"./results/noise_evolution_{name}.png")
+            plt.close(fig)
 
             # adding ancestors to graph and storing activations (step 19)
             acivation_per_variable = np.sum(
@@ -667,6 +685,7 @@ class GraphDiscovery:
                     "kernel_index": chosen_kernel,
                     "type": str(self.kernels[chosen_kernel]),
                     "gamma": float(gamma),
+                    "noise": float(noises[chosen_mode]),
                     "coeff": yb,
                 }
             )
@@ -683,7 +702,7 @@ class GraphDiscovery:
                     raise ValueError("Inconsistent activation")
 
             self.print_func(f"Ancestors of {name}: {ancestor_names}\n")
-            plt.show()
+
             index += 1
 
     def plot_graph(self, type_label=True, **kwargs):

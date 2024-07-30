@@ -67,11 +67,11 @@ def make_kernel_performance_function(kernels, gamma_min):
 
 def make_activation_function(kernel, memory_efficient):
 
-    def non_zero_activation(X, which_dim, which_dim_only, yb):
+    def activation(X, which_dim, which_dim_only, yb):
         mat = kernel.individual_influence(X, X, which_dim, which_dim_only)
         return np.dot(yb, mat @ yb)
 
-    def zero_activation(X, which_dim, which_dim_only, yb):
+    """def zero_activation(X, which_dim, which_dim_only, yb):
         return 0.0
 
     def activation(X, which_dim, which_dim_only, yb):
@@ -83,11 +83,24 @@ def make_activation_function(kernel, memory_efficient):
             which_dim,
             which_dim_only,
             yb,
-        )
+        )"""
 
     if not memory_efficient:
         activation_vmap = jax.vmap(activation, in_axes=(None, None, 0, None))
     else:
+        """batch_size = 20
+        activation_vmap_on_batch = jax.vmap(activation, in_axes=(None, None, 0, None))
+
+        def activation_vmap(X, which_dim, which_dim_only, yb):
+            pad = batch_size - (which_dim_only.shape[0] % batch_size)
+            pad = pad if pad != batch_size else 0
+            padded = np.pad(which_dim_only, ((0, pad), (0, 0)), constant_values=0)
+            to_process = np.reshape(padded, (-1, batch_size, which_dim_only.shape[1]))
+            res = jax.lax.map(
+                lambda w: activation_vmap_on_batch(X, which_dim, w, yb), to_process
+            )
+            res_right_shape = np.reshape(res, which_dim_only.shape[0] + pad)
+            return res_right_shape[: which_dim_only.shape[0]]"""
 
         def activation_vmap(X, which_dim, which_dim_only, yb):
             return jax.lax.map(
@@ -105,12 +118,31 @@ def make_activation_function(kernel, memory_efficient):
             np.all(active_modess == 0, axis=2, keepdims=True), activations, 2.0
         )"""
 
+    def get_vecs(X, which_dim_only, yb):
+        X_col = X[:, np.argmax(which_dim_only)]
+        vec = X_col * yb
+        vecsquared = X_col**2 * yb
+        return vec, vecsquared
+
+    get_vecs_vmap = jax.vmap(get_vecs, in_axes=(None, 0, None))
+
     def get_activations(X, yb, ga, active_modes):
         energy = -np.dot(ga, yb)
         which_dim = np.sum(active_modes, axis=0)
-        activations = activation_vmap(X, which_dim, active_modes, yb) / energy
-        activations = np.clip(activations, 0, None) / np.maximum(np.max(activations), 1)
-        return np.where(np.all(active_modes == 0, axis=1), 2.0, activations)
+        K_mat_all = 2 * (1 + np.dot(X * which_dim[None, :], X.T))
+        vecs, vecsquared = get_vecs_vmap(X, active_modes, yb)
+        activations = (
+            np.einsum("ij,ni,nj->n", K_mat_all, vecs, vecs)
+            - np.sum(vecsquared, axis=1) ** 2
+        ) / energy
+        # activations = np.clip(activations, 0, None) / np.maximum(np.max(activations), 1)
+        activations = np.where(np.all(active_modes == 0, axis=1), 2.0, activations)
+        """activations = activation_vmap(X, which_dim, active_modes, yb)
+        activations = activations / energy
+        # activations = np.clip(activations, 0, None) / np.maximum(np.max(activations), 1)
+        activations = np.where(np.all(active_modes == 0, axis=1), 2.0, activations)
+        jax.debug.print("second activation: {x}", x=activations)"""
+        return activations
 
     return get_activations
 
@@ -120,6 +152,9 @@ def make_find_ancestor_function(kernel, is_interpolatory=None, memory_efficient=
     get_activations_func = make_activation_function(kernel, memory_efficient)
     interpolatory_bool = (
         kernel.is_interpolatory if is_interpolatory is None else is_interpolatory
+    )
+    print(
+        f'making a function that is {"interpolatory" if interpolatory_bool else "non-interpolatory"}'
     )
     if interpolatory_bool:
         perform_regression = interpolatory.perform_regression
