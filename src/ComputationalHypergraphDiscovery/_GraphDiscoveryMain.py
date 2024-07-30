@@ -164,9 +164,7 @@ class GraphDiscovery:
             verbose=True,
         )
         new_graph.print_func = self.print_func
-        new_graph.modes.assign_clusters(
-            clusters
-        )  # assigns clusters to modeContainer object to handle clusters (this returns a new object)
+        new_graph.modes = ModeContainer(self.names, clusters)
         new_graph.G = self.G.copy()
         edges_to_remove = []
         flattened_clusters = [

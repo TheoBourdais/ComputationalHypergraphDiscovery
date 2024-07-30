@@ -54,7 +54,6 @@ def solve_variationnal(ga, gamma, cho_factor):
     - yb(np.ndarray): A numpy array representing the solution to the variationnal problem.
     - noise(float): A float representing the noise value.
     """
-    # solve yb = -K^-1@ga using the eigendeomposition of K
     yb = -jax_linalg.cho_solve(cho_factor, ga)
 
     noise = -gamma * np.dot(yb, yb) / np.dot(ga, yb)
