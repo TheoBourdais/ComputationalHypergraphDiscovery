@@ -153,9 +153,7 @@ def make_find_ancestor_function(kernel, is_interpolatory=None, memory_efficient=
     interpolatory_bool = (
         kernel.is_interpolatory if is_interpolatory is None else is_interpolatory
     )
-    print(
-        f'making a function that is {"interpolatory" if interpolatory_bool else "non-interpolatory"}'
-    )
+
     if interpolatory_bool:
         perform_regression = interpolatory.perform_regression
     else:
