@@ -11,15 +11,17 @@ def main():
     import os
 
     os.environ["CUDA_VISIBLE_DEVICES"] = f"{args.device}"
+    os.environ["JAX_TRACEBACK_FILTERING"] = "off"
+
     # preallocate 95% of GPU memory
-    os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".19"
-    os.environ["XLA_FLAGS"] = (
+    os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.95"
+    """os.environ["XLA_FLAGS"] = (
         "--xla_gpu_enable_triton_softmax_fusion=true "
         "--xla_gpu_triton_gemm_any=True "
         #'--xla_gpu_enable_async_collectives=true '
         "--xla_gpu_enable_latency_hiding_scheduler=true "
         "--xla_gpu_enable_highest_priority_async_stream=true "
-    )
+    )"""
     import jax
     import pickle
     import pandas as pd
@@ -37,7 +39,7 @@ def main():
     df = pd.read_csv("./BCR_uniform.csv")
     df = df[df.columns[df.std(axis=0) != 0]]
     df = df[list(df.columns[:1122]) + targets]
-    cut = 2400
+    cut = 600
     df_train = df[:cut]
     possible_edges = nx.DiGraph()
     edges = []
@@ -49,18 +51,23 @@ def main():
                 edges.append((f_node, nf_node))
                 edges.append((nf_node, f_node))
     possible_edges.add_edges_from(edges)
+    # possible_edges = pickle.load(open("./BCR.pkl", "rb"))
+
     graph_discovery = CHD.GraphDiscovery.from_dataframe(
         df_train,
         normalize=True,
         possible_edges=possible_edges,
         kernels=[CHD.Modes.QuadraticMode(memory_efficient_required=True)],
         gamma_min=2e-6,
+        # device=jax.devices()[args.device],
     )
     mode_chooser = CHD.decision.ThresholdModeChooser(threshold=0.025)
+    print(f"pruning {targets}")
     graph_discovery.fit(
         targets,
         mode_chooser=mode_chooser,
         message=f"experiment {args.device}_{args.run_index}",
+        # device=jax.devices()[args.device],
     )
     # save graph_discovery.G with name that uses time and run name
     save_name = f"./results/G_{args.device}_{args.run_index}.pkl"

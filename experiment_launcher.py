@@ -54,7 +54,7 @@ def main():
     df_batches.to_csv("batches.csv", index=False)"""
     df_batches = pd.read_csv("batches.csv")
     num_devices = 3
-    max_scripts_per_device = 5
+    max_scripts_per_device = 1
     num_experiments = len(df_batches)
     queue = Queue()
 
@@ -63,9 +63,9 @@ def main():
         queue.put(i)
 
     threads = []
-    for device_id in range(1, num_devices + 1):
+    for device_id in range(0, num_devices):
         # Create up to max_scripts_per_device threads per device
-        for _ in range(max_scripts_per_device - int(device_id == 0)):
+        for _ in range(max_scripts_per_device):
             t = Thread(target=worker, args=(device_id, queue))
             t.start()
             threads.append(t)
