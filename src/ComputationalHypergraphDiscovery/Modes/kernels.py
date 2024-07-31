@@ -194,14 +194,16 @@ class GaussianMode(ModeKernel):
         self.kernel = k
 
         def k_only_var(X, Y, which_dim, which_dim_only):
-            print("needs modification for cluster situation")
-            return self.quadratic_part.individual_influence(
-                X, Y, which_dim, which_dim_only
-            ) + jnp.prod(
-                1
-                - which_dim_only[None, None, :]
-                + which_dim[None, None, :] * self.exps,
-                axis=2,
+            rest = which_dim * (1 - which_dim_only)
+            only_part = (
+                jnp.prod(1 + which_dim_only[None, None, :] * self.exps, axis=2) - 1
+            )
+            rest_part = jnp.prod(1 + rest[None, None, :] * self.exps, axis=2)
+            return (
+                self.quadratic_part.individual_influence(
+                    X, Y, which_dim, which_dim_only
+                )
+                + only_part * rest_part
             )
 
         self.kernel_only_var = k_only_var
