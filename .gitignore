@@ -160,3 +160,11 @@ cython_debug/
 #.idea/
 #*.pkl
 *.npy
+examples/.DS_Store
+examples/Chemistry-Big/.DS_Store
+examples/Chemistry-Big/data_generation/.DS_Store
+examples/Chemistry-Big/data_generation/runs/.DS_Store
+examples/Chemistry-Big/data_generation/runs/2024_05_27__13_42_06/.DS_Store
+examples/Chemistry-Big/data_and_results/BCR.csv
+examples/Chemistry-Big/data_and_results/BCR_uniform.csv
+examples/Chemistry-Big/process big chemical reaction + generate noise plots.ipynb
