@@ -34,15 +34,12 @@ def perform_regression_and_find_gamma(K, ga, gamma_min, key):
     """
     eigenvalues, eigenvectors = np.linalg.eigh(K)
     gamma = find_gamma(eigenvalues=eigenvalues)
-    # eigenvalues += gamma
     gamma_used = jax.lax.max(gamma, gamma_min)
 
     yb, noise = solve_variationnal(
         ga, gamma=gamma_used, eigenvalues=eigenvalues, eigenvectors=eigenvectors
     )
     Z_low, Z_high, key = Z_test(gamma_used, eigenvalues, eigenvectors, key)
-    """jax.debug.print("gamma={x}", x=gamma)
-    jax.debug.print("gamma_used={x}", x=gamma_used)"""
     return yb, noise, Z_low, Z_high, gamma, key
 
 

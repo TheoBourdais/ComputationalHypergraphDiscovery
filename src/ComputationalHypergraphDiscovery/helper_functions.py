@@ -27,121 +27,75 @@ def make_preprocessing_functions():
     return remove_non_ancestors, remove_non_ancestors_no_adj
 
 
-def make_kernel_performance_function(kernels, gamma_min):
-    is_interpolatory = np.array([kernel.is_interpolatory for kernel in kernels])
-
-    # use jax.lax.cond to switch between _perform_regression_autogamma and _perform_regression_fixed_gamma
-    def compute_kernel_mats(X, which_dim):
-        res = []
-        for kernel in kernels:
-            res.append(kernel(X, X, which_dim=which_dim))
-        return np.stack(res, axis=0)
-
-    f_interpolatory = partial(
-        interpolatory.perform_regression_and_find_gamma, gamma_min=gamma_min
-    )
-    f_non_interpolatory = partial(
-        non_interpolatory.perform_regression_and_find_gamma, gamma_min=gamma_min
-    )
-
-    def choose_interpolatory(is_interpolatory, kernel_mat, ga, key):
-        """Apply either f_interpolatory or f_non_interpolatory based on a condition."""
-        return jax.lax.cond(
-            is_interpolatory,
-            lambda x: f_interpolatory(x, ga=ga, key=key),
-            lambda x: f_non_interpolatory(x, ga=ga, key=key),
-            kernel_mat,
-        )
-
-    mapped_choice = jax.vmap(
-        jax.jit(choose_interpolatory, donate_argnums=(1,)), in_axes=(0, 0, None, None)
-    )
-
-    def kernel_performance_function(X, which_dim, ga, key):
-        kernel_mats = compute_kernel_mats(X, which_dim)
-
-        return mapped_choice(is_interpolatory, kernel_mats, ga, key)
-
-    return kernel_performance_function
-
-
 def make_activation_function(kernel, memory_efficient):
+    if isinstance(kernel, kClass.LinearMode):
+
+        def get_vecs(X, which_dim_only, yb):
+            X_col = X[:, np.argmax(which_dim_only)]
+            vec = X_col * yb
+            vecsquared = X_col**2 * yb
+            return vec, vecsquared
+
+        get_vecs_vmap = jax.vmap(get_vecs, in_axes=(None, 0, None))
+
+        def get_activations(X, yb, ga, active_modes):
+            energy = -np.dot(ga, yb)
+            vecs, _ = get_vecs_vmap(X, active_modes, yb)
+            activations = np.sum(vecs, axis=1) ** 2 / energy
+            activations = np.clip(activations, 0, None) / np.maximum(
+                np.max(activations), 1
+            )
+            activations = np.where(np.all(active_modes == 0, axis=1), 2.0, activations)
+            return activations
+
+        return get_activations
+
+    if isinstance(kernel, kClass.QuadraticMode):
+
+        def get_vecs(X, which_dim_only, yb):
+            X_col = X[:, np.argmax(which_dim_only)]
+            vec = X_col * yb
+            vecsquared = X_col**2 * yb
+            return vec, vecsquared
+
+        get_vecs_vmap = jax.vmap(get_vecs, in_axes=(None, 0, None))
+
+        def get_activations(X, yb, ga, active_modes):
+            energy = -np.dot(ga, yb)
+            which_dim = np.sum(active_modes, axis=0)
+            K_mat_all = 2 * (1 + np.dot(X * which_dim[None, :], X.T))
+            vecs, vecsquared = get_vecs_vmap(X, active_modes, yb)
+            activations = (
+                np.einsum("ij,ni,nj->n", K_mat_all, vecs, vecs)
+                - np.sum(vecsquared, axis=1) ** 2
+            ) / energy
+            activations = np.clip(activations, 0, None) / np.maximum(
+                np.max(activations), 1
+            )
+            activations = np.where(np.all(active_modes == 0, axis=1), 2.0, activations)
+            return activations
+
+        return get_activations
 
     def activation(X, which_dim, which_dim_only, yb):
         mat = kernel.individual_influence(X, X, which_dim, which_dim_only)
         return np.dot(yb, mat @ yb)
 
-    """def zero_activation(X, which_dim, which_dim_only, yb):
-        return 0.0
-
-    def activation(X, which_dim, which_dim_only, yb):
-        return jax.lax.cond(
-            np.any(which_dim_only),
-            non_zero_activation,
-            zero_activation,
-            X,
-            which_dim,
-            which_dim_only,
-            yb,
-        )"""
-
     if not memory_efficient:
         activation_vmap = jax.vmap(activation, in_axes=(None, None, 0, None))
     else:
-        """batch_size = 20
-        activation_vmap_on_batch = jax.vmap(activation, in_axes=(None, None, 0, None))
-
-        def activation_vmap(X, which_dim, which_dim_only, yb):
-            pad = batch_size - (which_dim_only.shape[0] % batch_size)
-            pad = pad if pad != batch_size else 0
-            padded = np.pad(which_dim_only, ((0, pad), (0, 0)), constant_values=0)
-            to_process = np.reshape(padded, (-1, batch_size, which_dim_only.shape[1]))
-            res = jax.lax.map(
-                lambda w: activation_vmap_on_batch(X, which_dim, w, yb), to_process
-            )
-            res_right_shape = np.reshape(res, which_dim_only.shape[0] + pad)
-            return res_right_shape[: which_dim_only.shape[0]]"""
 
         def activation_vmap(X, which_dim, which_dim_only, yb):
             return jax.lax.map(
                 lambda w: activation(X, which_dim, w, yb), which_dim_only
             )
 
-    """activation_vmap = jax.vmap(activation, in_axes=(None, 0, 0, 0))
-    activation_vmap = jax.vmap(activation_vmap, in_axes=(None, None, 1, None))
-"""
-    """def get_activations(X, ybs, gas, active_modess):
-        energies = -np.vecdot(gas, ybs)
-        which_dim = np.sum(active_modess, axis=1)
-        activations = activation_vmap(X, which_dim, active_modess, ybs) / energies
-        return np.where(
-            np.all(active_modess == 0, axis=2, keepdims=True), activations, 2.0
-        )"""
-
-    def get_vecs(X, which_dim_only, yb):
-        X_col = X[:, np.argmax(which_dim_only)]
-        vec = X_col * yb
-        vecsquared = X_col**2 * yb
-        return vec, vecsquared
-
-    get_vecs_vmap = jax.vmap(get_vecs, in_axes=(None, 0, None))
-
     def get_activations(X, yb, ga, active_modes):
         energy = -np.dot(ga, yb)
         which_dim = np.sum(active_modes, axis=0)
-        K_mat_all = 2 * (1 + np.dot(X * which_dim[None, :], X.T))
-        vecs, vecsquared = get_vecs_vmap(X, active_modes, yb)
-        activations = (
-            np.einsum("ij,ni,nj->n", K_mat_all, vecs, vecs)
-            - np.sum(vecsquared, axis=1) ** 2
-        ) / energy
-        # activations = np.clip(activations, 0, None) / np.maximum(np.max(activations), 1)
+        activations = activation_vmap(X, which_dim, active_modes, yb) / energy
+        activations = np.clip(activations, 0, None) / np.maximum(np.max(activations), 1)
         activations = np.where(np.all(active_modes == 0, axis=1), 2.0, activations)
-        """activations = activation_vmap(X, which_dim, active_modes, yb)
-        activations = activations / energy
-        # activations = np.clip(activations, 0, None) / np.maximum(np.max(activations), 1)
-        activations = np.where(np.all(active_modes == 0, axis=1), 2.0, activations)
-        jax.debug.print("second activation: {x}", x=activations)"""
         return activations
 
     return get_activations
@@ -153,9 +107,7 @@ def make_find_ancestor_function(kernel, is_interpolatory=None, memory_efficient=
     interpolatory_bool = (
         kernel.is_interpolatory if is_interpolatory is None else is_interpolatory
     )
-    print(
-        f'making a function that is {"interpolatory" if interpolatory_bool else "non-interpolatory"}'
-    )
+
     if interpolatory_bool:
         perform_regression = interpolatory.perform_regression
     else:
@@ -172,53 +124,3 @@ def make_find_ancestor_function(kernel, is_interpolatory=None, memory_efficient=
         return (active_modes, yb, gamma, key, activations, noise, Z_low, Z_high)
 
     return jax.vmap(step, in_axes=(None, 0, 0, 0, 0, 0, 0))
-
-
-def make_for_loop_function(get_activations_func, chosen_kernel, perform_regression):
-    def f_for_loop(carry, x):
-        active_modes, ga, gamma, yb, key, X, i = carry
-        activations = get_activations_func(
-            i=i, X=X, yb=yb, ga=ga, active_modes=active_modes
-        )
-        min_activation = np.argmin(activations)
-        active_modes = active_modes.at[min_activation, :].set(0)
-        mat = chosen_kernel(i, X, X, np.sum(active_modes, axis=0))
-        yb, noise, Z_low, Z_high, gamma, key = perform_regression(
-            i=i, K=mat, ga=ga, gamma=gamma, key=key
-        )
-        return (active_modes, ga, gamma, yb, key, X, i), (
-            np.sum(active_modes, axis=0),
-            activations,
-            noise,
-            Z_low,
-            Z_high,
-        )
-
-    return f_for_loop
-
-
-def make_regression_func(kernels, gamma_min):
-    f_interpolatory = partial(interpolatory.perform_regression, gamma_min=gamma_min)
-    f_non_interpolatory = partial(
-        non_interpolatory.perform_regression, gamma_min=gamma_min
-    )
-
-    branch_functions = [lambda x, k=k: k.is_interpolatory for k in kernels]
-    dummy_variable = -1
-    interpolatory_func = lambda i: jax.lax.switch(i, branch_functions, dummy_variable)
-
-    def perform_regression(i, K, ga, gamma, key):
-        """Apply either f_interpolatory or f_non_interpolatory based on a condition."""
-        return jax.lax.cond(
-            interpolatory_func(i),
-            lambda K, ga, gamma, key: f_interpolatory(K=K, ga=ga, gamma=gamma, key=key),
-            lambda K, ga, gamma, keys: f_non_interpolatory(
-                K=K, ga=ga, gamma=gamma, key=key
-            ),
-            K,
-            ga,
-            gamma,
-            key,
-        )
-
-    return jax.jit(perform_regression, donate_argnums=(1,))

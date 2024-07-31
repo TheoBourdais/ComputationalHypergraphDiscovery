@@ -155,7 +155,6 @@ class GraphDiscovery:
         Returns:
         GraphDiscovery object
         """
-        print("to update")
 
         new_graph = GraphDiscovery(
             X=self.X,
@@ -165,9 +164,7 @@ class GraphDiscovery:
             verbose=True,
         )
         new_graph.print_func = self.print_func
-        new_graph.modes.assign_clusters(
-            clusters
-        )  # assigns clusters to modeContainer object to handle clusters (this returns a new object)
+        new_graph.modes = ModeContainer(self.names, clusters)
         new_graph.G = self.G.copy()
         edges_to_remove = []
         flattened_clusters = [
@@ -224,9 +221,6 @@ class GraphDiscovery:
         key=random.PRNGKey(0),
         kernel_chooser=None,
         mode_chooser=None,
-        early_stopping=None,
-        jit_all=True,
-        vmap=True,
         message="",
     ):
         """
@@ -262,10 +256,6 @@ class GraphDiscovery:
         else:
             mode_chooser.is_a_mode_chooser()
         mode_chooser = jax.jit(jax.vmap(mode_chooser, in_axes=(0, 0, (0, 0))))
-        """if early_stopping is None:
-            early_stopping = NoEarlyStopping()
-        else:
-            early_stopping.is_an_early_stopping()"""
 
         if targets is None:
             targets = self.names
@@ -509,6 +499,8 @@ class GraphDiscovery:
         pbar.set_postfix_str(message)
         ancestor_finding_step = ancestor_finding_step_funcs[kernel]
         for step in range(loop_number):
+            # because of the very high number of ancestor, gamma_min needs to be recomputed often, to avoid numerical instability
+            # and keep it as small as possible
             p = X.shape[1] - step - 1
             if step % 50 == 0 or (p * (p + 1)) / 2 == X.shape[1]:
                 K_mat = self.vmaped_kernel[kernel](
@@ -519,22 +511,6 @@ class GraphDiscovery:
                 gamma_min_kernel = np.where(
                     min_eigenvalue + 1e-9 < 0, -2 * min_eigenvalue, 1e-9
                 )
-            """if not has_changed and (p * (p + 1)) / 2 < X.shape[1]:
-                has_changed = True
-                ancestor_finding_step = jax.jit(
-                    make_find_ancestor_function(
-                        kernel,
-                        memory_efficient=kernel.memory_efficient_required,
-                        is_interpolatory=False,
-                    )
-                )
-                K_mat = self.vmaped_kernel[kernel](
-                    self.X, self.X, np.sum(active_modess_kernel, axis=1)
-                )
-                res = self.non_interpolatory_regression_find_gamma(
-                    K_mat, gas_kernel, gamma_min_kernel, subkeys_kernel
-                )
-                ybs_kernel, _, _, _, gammas_kernel, subkeys_kernel = res"""
 
             (
                 active_modess_kernel,
@@ -654,15 +630,6 @@ class GraphDiscovery:
 
             # plot evolution of noise and Z, and in second plot on the side evolution of Z_{k+1}-Z_k
             ancestor_number = [np.sum(mode) for mode in ancestor_modes]
-            # save data
-            np.save(f"./results/noise_evolution_{name}.npy", noises)
-            np.save(f"./results/Z_low_evolution_{name}.npy", Z_low)
-            np.save(f"./results/Z_high_evolution_{name}.npy", Z_high)
-            np.save(f"./results/activations_{name}.npy", activations)
-            np.save(f"./results/ancestor_modes_{name}.npy", ancestor_modes)
-            np.save(f"./results/ancestor_number_{name}.npy", ancestor_number)
-            np.save(f"./results/gamma_{name}.npy", gammas)
-
             fig, axes = plot_noise_evolution(
                 ancestor_number,
                 noises,
@@ -671,7 +638,6 @@ class GraphDiscovery:
                 ancestor_modes_number=ancestor_number[chosen_mode],
             )
             plt.show()
-            fig.savefig(f"./results/noise_evolution_{name}.png")
             plt.close(fig)
 
             # adding ancestors to graph and storing activations (step 19)
