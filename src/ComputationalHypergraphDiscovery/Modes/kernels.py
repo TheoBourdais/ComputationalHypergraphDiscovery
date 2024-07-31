@@ -129,8 +129,6 @@ class QuadraticMode(ModeKernel):
             linear_only = jnp.dot(X * which_dim_only[None, :], Y.T)
             rest = which_dim * (1 - which_dim_only)
             linear_rest = jnp.dot(X * rest[None, :], Y.T)
-            print(linear_only)
-            print(linear_rest)
             return (1 + linear_only) ** 2 + 2 * linear_only * linear_rest - 1
 
         self.kernel = vectorized_kernel
