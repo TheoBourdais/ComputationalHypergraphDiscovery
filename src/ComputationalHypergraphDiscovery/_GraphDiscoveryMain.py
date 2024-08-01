@@ -1,26 +1,36 @@
-import numpy as np
+from functools import partial
+import time
+import jax.numpy as np
 import networkx as nx
-from scipy.optimize import minimize
 import matplotlib.pyplot as plt
-import scipy.linalg
+import jax.scipy.linalg as jax_linalg
+from jax import random
+import jax
+from jax.scipy.optimize import minimize
+from tqdm import tqdm
+from . import interpolatory, non_interpolatory
 
 
 from .Modes import ModeContainer, LinearMode, QuadraticMode, GaussianMode
 from .decision import *
 from .util import partition_layout, plot_noise_evolution
+from .helper_functions import make_find_ancestor_function, make_preprocessing_functions
 
 
 class GraphDiscovery:
-    """GraphDiscovery is the main class of CHD. It is used to discover the hypergraph structure of a dataset. It contains a Networkx object G that
+    """
+    GraphDiscovery is the main class of CHD. It is used to discover the hypergraph structure of a dataset. It contains a Networkx object G that
     stores the results of graph discovery. It also contains a ModeContainer object that stores the kernel matrices of the modes of the dataset.
+
     To instantiate a graph discovery, you need:
-        - X: the dataset, as a numpy array of shape (n_features, n_samples) of real numbers.
+        - X: the dataset, as a numpy array of shape (n_samples, n_features) of real numbers.
         - names: the names of the features, as a list of strings
-        - mode_kernels: the kernels used to compute the modes of the dataset (must be a mode kernel object). If None, the default kernels are used (linear, quadratic and gaussian)
-        - mode_container: Alternatively, if the kernel matrices are already computed (for instance when reusing computations from a previous graph), you can provide a ModeContainer object,
-        which contains the kernel matrices of the modes of the dataset. You cannot provide both mode_kernels and mode_container.
+        - kernels: the kernels used to compute the modes of the dataset (must be a list of ModeKernel objects). If None, the default kernels are used (linear, quadratic and gaussian)
+        - normalize: Whether to normalize the data before graph discovery (normalization means centering and scaling to unit variance).
         - clusters: if you want to use clusters of node, you can provide a list of lists of strings, where each sublist is a cluster of nodes. If None, no clustering is used.
         - possible_edges: if you want to restrict the possible edges of the graph, you can provide a networkx.DiGraph object, where each edge is a possible edge of the graph.
+        - verbose: whether to print information during graph discovery
+        - gamma_min: the minimum value of gamma used in the graph discovery process
 
     Available class methods:
         - from_dataframe: alternative constructor, that takes a pandas dataframe as input. You can also provide normalize=True to normalize the data before graph discovery, as well as any keyword argument of the constructor.
@@ -39,67 +49,87 @@ class GraphDiscovery:
         self,
         X,
         names,
-        mode_kernels=None,
-        mode_container=None,
+        kernels=None,
         normalize=True,
         clusters=None,
         possible_edges=None,
         verbose=True,
+        gamma_min=1e-9,
     ) -> None:
         """
-        Builds GraphDiscovery object. In particular, if mode_container is None, it computes the kernel matrices of the modes of the dataset, which
-        can be computationally expensive. If you want to reuse computations from a previous graph, you can provide a ModeContainer object instead.
+        Builds GraphDiscovery object.
 
         Args:
-        - X (np.ndarray):the dataset, as an array of shape (n_features, n_samples). Data is treated as real numbers.
-        - names (list of strings): the names of the features,
-        - mode_kernels (ModeKernelList or ModeKernel, default None): the kernels used to compute the modes of the dataset. If None, the default kernels are used (linear, quadratic and gaussian)
-        - mode_container (ModeContainer object, default None): alternatively, if the kernel matrices are already computed (for instance when reusing computations from a previous graph), you can provide a ModeContainer object,
-            which contains the kernel matrices of the modes of the dataset. You cannot provide both mode_kernels and mode_container.
+        - X (np.ndarray): the dataset, as an array of shape (n_samples, n_features). Data is treated as real numbers.
+        - names (list of strings): the names of the features.
+        - kernels (list of ModeKernel, default None): the kernels used to compute the modes of the dataset. If None, the default kernels are used (linear, quadratic, and Gaussian).
         - normalize (boolean, default True): Whether to normalize the data before graph discovery (normalization means centering and scaling to unit variance).
-        - clusters (list of lists of strings, default None): if you want to use clusters of node, you can provide a list of lists of strings, where each sublist is a cluster of nodes. If None, no clustering is used.
+        - clusters (list of lists of strings, default None): if you want to use clusters of nodes, you can provide a list of lists of strings, where each sublist is a cluster of nodes. If None, no clustering is used.
         - possible_edges (nx.DiGraph object, default None): if you want to restrict the possible edges of the graph, you can provide the possible_edges, where each edge is a possible edge of the graph.
-        - verbose (boolean, default True): whether to print information during graph discovery
+        - verbose (boolean, default True): whether to print information during graph discovery.
+        - gamma_min (float, default 1e-9): the minimum value for the regularization parameter gamma.
 
         Returns:
         - GraphDiscovery object
         """
 
-        assert X.shape[0] == len(
+        assert X.shape[1] == len(
             names
         ), "X must have as many columns as there are names"
         assert len(X.shape) == 2, "X must be a 2D array"
         assert not np.isnan(np.sum(X)), "X must not contain NaN values"
         assert not np.isinf(np.sum(X)), "X must not contain infinite values"
-        standard_devs = X.std(axis=1, keepdims=True)
+        standard_devs = X.std(axis=0, keepdims=True)
         if np.any(standard_devs == 0):
             raise ValueError(
                 "Some features have a standard deviation of 0. This can lead to numerical instability. Please remove these features."
             )
 
         if normalize:
-            self.X = (X - X.mean(axis=1, keepdims=True)) / standard_devs
+            self.mean_x = X.mean(axis=0, keepdims=True)
+            self.std_x = standard_devs
+            self.X = (X - self.mean_x) / self.std_x
         else:
+            self.mean_x = np.zeros((1, X.shape[1]))
+            self.std_x = np.ones((1, X.shape[1]))
             self.X = X
         self.print_func = print if verbose else lambda *a, **k: None
         self.names = names
 
         self.name_to_index = {name: index for index, name in enumerate(names)}
+        if possible_edges is not None:
+            possible_edges.remove_edges_from(nx.selfloop_edges(possible_edges))
+            self.print_func("Converting possible edges to dense adjacency matrix")
+            self.possible_edges_adjacency = np.array(
+                nx.adjacency_matrix(possible_edges, nodelist=self.names).todense()
+            )
         self.possible_edges = possible_edges
         self.G = nx.DiGraph()
         self.G.add_nodes_from(names)
 
-        if mode_container is not None:
-            assert mode_kernels is None
-            self.modes = mode_container
+        self.has_clusters = clusters is not None
+        self.modes = ModeContainer(self.names, clusters)
+        if kernels is None:
+            kernels = [LinearMode(), QuadraticMode(), GaussianMode(l=1)]
         else:
-            if mode_kernels is None:
-                mode_kernels = 0.1 * (
-                    LinearMode() + QuadraticMode() + GaussianMode(l=1.0)
-                )
-            self.modes = ModeContainer.from_mode_kernels(
-                self.X, names, mode_kernels, clusters
-            )
+            assert len(kernels) == len(
+                set([str(k) for k in kernels])
+            ), "Kernels must have different names"
+
+        self._kernels = kernels
+
+        self.gamma_min = gamma_min
+        self.prepare_functions(is_interpolatory=None)
+
+    @property
+    def kernels(self):
+        return self._kernels
+
+    @kernels.setter
+    def kernels(self, *args, **kwargs):
+        raise ValueError(
+            "Kernels cannot be changed after initialization as JAX does not support changing the function signature of a jit-compiled function. Please create a new GraphDiscovery object with the desired kernels."
+        )
 
     def from_dataframe(df, **kwargs):
         """
@@ -115,7 +145,7 @@ class GraphDiscovery:
         - GraphDiscovery object
         """
         X = df.values
-        return GraphDiscovery(X=X.T, names=df.columns, **kwargs)
+        return GraphDiscovery(X=X, names=df.columns, **kwargs)
 
     def prepare_new_graph_with_clusters(self, clusters):
         """
@@ -138,9 +168,7 @@ class GraphDiscovery:
             verbose=True,
         )
         new_graph.print_func = self.print_func
-        new_graph.modes.assign_clusters(
-            clusters
-        )  # assigns clusters to modeContainer object to handle clusters (this returns a new object)
+        new_graph.modes = ModeContainer(self.names, clusters)
         new_graph.G = self.G.copy()
         edges_to_remove = []
         flattened_clusters = [
@@ -155,16 +183,63 @@ class GraphDiscovery:
             for other_node in other_nodes:
                 edges_to_remove.append((node, other_node))
         new_graph.G.remove_edges_from(edges_to_remove)
+        new_graph.has_clusters = True
         return new_graph
+
+    def prepare_functions(self, is_interpolatory=None):
+        """
+        Prepares various functions used in the graph discovery process.
+
+        Args:
+            is_interpolatory (bool, optional): Flag indicating whether to force a the interpolatory behavior. Useful when a high number of features make non-interpolatory kernels (like quadratic) actually behave like an interpolatory kernel. Defaults to None.
+
+        Returns:
+            None
+        """
+        scales = {k.name: k.scale for k in self.kernels}
+        for kernel in self.kernels:
+            kernel.setup(self.X, scales=scales)
+
+        self.interpolary_regression_find_gamma = jax.jit(
+            jax.vmap(
+                interpolatory.perform_regression_and_find_gamma,
+                in_axes=(0, 0, 0, 0),
+            )
+        )
+        self.non_interpolatory_regression_find_gamma = jax.jit(
+            jax.vmap(
+                non_interpolatory.perform_regression_and_find_gamma,
+                in_axes=(0, 0, 0, 0),
+            )
+        )
+        apply_kernel = lambda k, X, Y, which_dim: k(X, Y, which_dim)
+        self.vmaped_kernel = {
+            k: jax.jit(jax.vmap(partial(apply_kernel, k), in_axes=(None, None, 0)))
+            for k in self.kernels
+        }
+        self.ancestor_finding_step_funcs = {
+            kernel: jax.jit(
+                make_find_ancestor_function(
+                    kernel,
+                    scales,
+                    has_clusters=self.has_clusters,
+                    memory_efficient=kernel.memory_efficient_required,
+                    is_interpolatory=is_interpolatory,
+                )
+            )
+            for kernel in self.kernels
+        }
+        self.remove_ancestors, self.remove_ancestors_no_adj = (
+            make_preprocessing_functions()
+        )
 
     def fit(
         self,
         targets=None,
-        gamma="auto",
-        gamma_min=1e-9,
+        key=random.PRNGKey(0),
         kernel_chooser=None,
         mode_chooser=None,
-        early_stopping=None,
+        message="",
     ):
         """
         Performs graph discovery. You can provide a list of targets (nodes of the graph) to discover ancestors of these targets. If None, the ancestors of all nodes are discovered.
@@ -173,17 +248,10 @@ class GraphDiscovery:
         Args:
         - targets(list of strings, default None): nodes for which we discover the ancestors.
             Each string is the name of a node of the graph. If None, the ancestors of all nodes are discovered.
-        - gamma(float or "auto", default "auto"): the gamma parameter used for the regression.
-            If "auto", the gamma parameter is automatically determined.
-            If a float, the gamma parameter is fixed to this value.
-            It is advised to use "auto" for most applications, as a good choice of gamma is crucial for the performance of the algorithm, and unintuitive to find.
-        - gamma_min (float, default 1e-9): the minimum value of gamma allowed. If gamma is "auto", the gamma parameter is automatically determined, but must be greater than gamma_min.
-            A gamma_min that is too small may lead to numerical instability.
         - kernel_chooser (KernelChooser, default None): a KernelChooser object that chooses the kernel to use for each node. If None, a MinNoiseKernelChooser is used.
         - mode_chooser (ModeChooser, default None): a ModeChooser object that chooses the mode to use for each node. If None, a MaxIncrementModeChooser is used.
-        - early_stopping (EarlyStopping object, default None): an object of a class that implements the EarlyStopping interface. If None, a NoEarlyStopping is used.
 
-        See ComputationalHyperGraph.decision module for details on KernelChooser, ModeChooser and EarlyStopping objects.
+        See ComputationalHyperGraph.decision module for details on KernelChooser and ModeChooser objects.
 
         Returns:
         - None
@@ -198,415 +266,488 @@ class GraphDiscovery:
             mode_chooser = MaxIncrementModeChooser()
         else:
             mode_chooser.is_a_mode_chooser()
-        if early_stopping is None:
-            early_stopping = NoEarlyStopping()
-        else:
-            early_stopping.is_an_early_stopping()
+        mode_chooser = jax.jit(jax.vmap(mode_chooser, in_axes=(0, 0, (0, 0))))
 
         if targets is None:
             targets = self.names
+        gas, active_modess = self._prepare_modes_for_ancestor_finding(targets)
         # running ancestor finding for each target
-        for name in targets:
-            self.print_func(f"finding ancestors of {name}")
-            self._find_ancestors(
-                name, gamma, gamma_min, kernel_chooser, mode_chooser, early_stopping
-            )
-            self.print_func("\n")
+        key, *subkeys = random.split(key, len(targets) + 1)
 
-    def _prepare_modes_for_ancestor_finding(self, name):
+        subkeys = np.array(subkeys)
+
+        kernel_performance = self.get_kernel_performance(active_modess, gas, subkeys)
+
+        ybs, gammas, subkeys, noisess, Z_lows, Z_highs, chosen_kernels = (
+            GraphDiscovery.choose_kernel(kernel_performance, kernel_chooser)
+        )
+
+        for i, kernel in enumerate(self.kernels):
+            mask_kernel = chosen_kernels == i
+            if not np.any(mask_kernel):
+                continue
+
+            (
+                active_modess_kernel,
+                noisess_kernel,
+                Z_lows_kernel,
+                Z_highs_kernel,
+                activationss_kernel,
+                gammas_kernel,
+                ybs_kernel,
+            ) = self.prune_ancestors(
+                kernel,
+                self.ancestor_finding_step_funcs,
+                X=self.X,
+                active_modess_kernel=active_modess[mask_kernel],
+                gas_kernel=gas[mask_kernel],
+                ybs_kernel=ybs[mask_kernel],
+                gammas_kernel=gammas[mask_kernel],
+                subkeys_kernel=subkeys[mask_kernel],
+                noise_kernel=noisess[mask_kernel],
+                Z_low_kernel=Z_lows[mask_kernel],
+                Z_high_kernel=Z_highs[mask_kernel],
+                loop_number=len(self.modes.clusters) - 2,
+                message=message,
+            )
+            anomaly_noise = np.logical_or(noisess_kernel > 1.05, noisess_kernel < -0.05)
+            anomaly_Z_low = np.logical_or(Z_lows_kernel > 1.05, Z_lows_kernel < -0.05)
+            anomaly_Z_high = np.logical_or(
+                Z_highs_kernel > 1.05, Z_highs_kernel < -0.05
+            )
+
+            if np.any(anomaly_noise) or np.any(anomaly_Z_low) or np.any(anomaly_Z_high):
+                print(
+                    "-" * 50
+                    + "\n** Anomaly in noise or Z values, consider increasing gamma_min **\n"
+                    + "-" * 50
+                )
+                first_occurence_noise = np.argmax(anomaly_noise, axis=1, keepdims=True)
+                first_occurence_Z_low = np.argmax(anomaly_Z_low, axis=1, keepdims=True)
+                first_occurence_Z_high = np.argmax(
+                    anomaly_Z_high, axis=1, keepdims=True
+                )
+                noisess_kernel = np.where(
+                    np.logical_and(
+                        np.arange(noisess_kernel.shape[1])[None, :]
+                        >= first_occurence_noise,
+                        np.any(anomaly_noise, axis=1, keepdims=True),
+                    ),
+                    1.0,
+                    noisess_kernel,
+                )
+                Z_lows_kernel = np.where(
+                    np.logical_and(
+                        np.arange(Z_lows_kernel.shape[1])[None, :]
+                        >= first_occurence_Z_low,
+                        np.any(anomaly_Z_low, axis=1, keepdims=True),
+                    ),
+                    1.0,
+                    Z_lows_kernel,
+                )
+                Z_highs_kernel = np.where(
+                    np.logical_and(
+                        np.arange(Z_highs_kernel.shape[1])[None, :]
+                        >= first_occurence_Z_high,
+                        np.any(anomaly_Z_high, axis=1, keepdims=True),
+                    ),
+                    1.0,
+                    Z_highs_kernel,
+                )
+
+            chosen_modes = mode_chooser(
+                active_modess_kernel,
+                noisess_kernel,
+                (Z_lows_kernel, Z_highs_kernel),
+            )
+            self.process_results(
+                targets,
+                i,
+                mask_kernel,
+                chosen_modes,
+                active_modess_kernel,
+                noisess_kernel,
+                Z_lows_kernel,
+                Z_highs_kernel,
+                activationss_kernel,
+                kernel_performance,
+                gammas_kernel,
+                ybs_kernel,
+            )
+        self.process_results(
+            targets,
+            -1,
+            chosen_kernels == -1,
+            *([None] * 6),
+            kernel_performance,
+            None,
+            None,
+        )
+
+    def _prepare_modes_for_ancestor_finding(self, names):
         """
         Prepares the modes for finding the ancestors of 'name' by deleting the node with the given name from the modes and
         deleting all nodes that are not possible ancestors of the given node. Note that this deletes also the nodes that are in the same cluster as the given node.
 
         Args:
-        - name (str): the name of the node to be deleted from the modes
+        - names (str): the name of the node to be deleted from the modes
 
         Returns:
         - ga (numpy.ndarray): the adjacency matrix of the node with the given name
         - active_modes (Modes): the modes with the node with the given name deleted and all nodes that are not
                                 possible ancestors of the given node deleted
         """
-        ga = self.X[self.name_to_index[name]]
-        active_modes = self.modes.delete_node_by_name(name)
-        if self.possible_edges is not None:
-            for possible_name in active_modes.names:
-                if (
-                    possible_name not in self.possible_edges.predecessors(name)
-                    and possible_name != name
-                ):
-                    active_modes = active_modes.delete_node_by_name(possible_name)
-        return ga, active_modes
+        indexes = np.array([self.modes.name_to_index[name] for name in names])
+        gas = self.X[:, indexes].T
+        if self.possible_edges is None:
+            active_modes = self.remove_ancestors_no_adj(
+                self.modes.index_matrix, indexes
+            )
+        else:
+            active_modes = self.remove_ancestors(
+                self.possible_edges_adjacency, self.modes.index_matrix, indexes
+            )
+        return gas, active_modes
 
-    def _find_ancestors(
+    def get_kernel_performance(
+        self, active_modess, gas, subkeys, use_interpolatory=None
+    ):
+        """
+        Calculates the performance of each kernel in terms of signal-to-noise ratio.
+
+        Args:
+            active_modess (jax.numpy.ndarray): Array of active modes.
+            gas (jax.numpy.ndarray): array of target vectors
+            subkeys (list): List of subkeys.
+            use_interpolatory (bool, optional): Flag indicating whether to use interpolatory regression.
+                Defaults to None.
+
+        Returns:
+            tuple: A tuple containing the performance metrics for each kernel. The tuple contains 6 arrays:
+                - Array 1: The coefficients of the kernel regression.
+                - Array 2: The signal-to-noise ratios.
+                - Array 3: Z_low for Z-test
+                - Array 4: Z_high for Z-test
+                - Array 5: gamma found
+                - Array 6: key (used for random number generation by JAX)
+        """
+        kernel_performance = []
+
+        for kernel in self.kernels:
+            K_mat = self.vmaped_kernel[kernel](
+                self.X, self.X, np.sum(active_modess, axis=1)
+            )
+            min_eigenvalue = np.min(np.linalg.eigvalsh(K_mat), axis=1)
+            gamma_mins = np.where(
+                min_eigenvalue + self.gamma_min < 0, -2 * min_eigenvalue, self.gamma_min
+            )
+            interpolatory_bool = (
+                kernel.is_interpolatory
+                if use_interpolatory is None
+                else use_interpolatory
+            )
+            if interpolatory_bool:
+                res = self.interpolary_regression_find_gamma(
+                    K_mat, gas, gamma_mins, subkeys
+                )
+            else:
+                res = self.non_interpolatory_regression_find_gamma(
+                    K_mat, gas, gamma_mins, subkeys
+                )
+            if np.isnan(res[4]).any():
+                print(
+                    "Somme gammas were found to be NaNs. This error may not be corrected, so corresponding signal-to-noise ratio are set to 1"
+                )
+                new_res_1 = np.where(np.isnan(res[4]), 1, res[1])
+                res = (res[0], new_res_1, *res[2:])
+            if np.isnan(res[1]).any():
+                error_message = "The regression has returned NaNs, this is likely due to the kernel matrix not being positive definite\n"
+                error_message += "See the spectrum below for confirmation. Consider increasing gamma_min\n"
+                error_message += (
+                    f"{np.linalg.eigvalsh(K_mat[np.argmax(np.isnan(res[1]))])}"
+                )
+                raise ValueError(error_message)
+            kernel_performance.append(res)
+        kernel_performance = tuple(
+            np.stack([k_perf[i] for k_perf in kernel_performance], axis=1)
+            for i in range(6)
+        )
+        return kernel_performance
+
+    def choose_kernel(kernel_performances, kernel_chooser):
+        """
+        Choose the best kernel based on the given kernel performances.
+
+        Args:
+            kernel_performances (list): A list of kernel performances for each kernel.
+            kernel_chooser (function): A function that chooses the best kernel based on the performances.
+
+        Returns:
+            tuple: A tuple containing the following arrays:
+                - ybs (numpy.ndarray): Array of yb values.
+                - gammas (numpy.ndarray): Array of gamma values.
+                - subkeys (numpy.ndarray): Array of subkey values.
+                - noisess (numpy.ndarray): Array of noise values.
+                - Z_lows (numpy.ndarray): Array of Z_low values.
+                - Z_highs (numpy.ndarray): Array of Z_high values.
+                - chosen_kernels (numpy.ndarray): Array of chosen kernel values.
+        """
+        ybs = []
+        gammas = []
+        subkeys = []
+        noisess = []
+        Z_lows = []
+        Z_highs = []
+        chosen_kernels = []
+        for i in range(kernel_performances[0].shape[0]):
+            which_kernel, yb, noise, Z_low, Z_high, gamma, skey = kernel_chooser(
+                [kernel_performances[j][i] for j in range(6)]
+            )
+            chosen_kernels.append(which_kernel)
+            ybs.append(yb)
+            noisess.append(noise)
+            Z_lows.append(Z_low)
+            Z_highs.append(Z_high)
+            gammas.append(gamma)
+            subkeys.append(skey)
+        ybs = np.array(ybs)
+        gammas = np.array(gammas)
+        subkeys = np.array(subkeys)
+        noisess = np.array(noisess)
+        Z_lows = np.array(Z_lows)
+        Z_highs = np.array(Z_highs)
+        chosen_kernels = np.array(chosen_kernels)
+        subkeys = np.array(subkeys)
+        return ybs, gammas, subkeys, noisess, Z_lows, Z_highs, chosen_kernels
+
+    def prune_ancestors(
         self,
-        name,
-        gamma,
-        gamma_min,
-        kernel_chooser,
-        mode_chooser,
-        early_stopping,
+        kernel,
+        ancestor_finding_step_funcs,
+        X,
+        active_modess_kernel,
+        gas_kernel,
+        ybs_kernel,
+        gammas_kernel,
+        subkeys_kernel,
+        noise_kernel,
+        Z_low_kernel,
+        Z_high_kernel,
+        loop_number,
+        message,
     ):
         """
-        Finds ancestors of a given node in the graph. This method is called by the fit method.
-        This corresponds algorthm 1 in the paper.
-        Has two main components:
-            - finding the kernel to use for each node using _compute_kernel_preformances and the kernel_chooser
-            - pruning the ancestors of the node using the chosen kernel using _iterative_ancestor_pruner
-
-        Finally, the mode_chooser is used to choose the ancestors of the nodes. Data is stored in the graph an the noise evolutionis plotted.
+        Prunes ancestors based on the given parameters.
 
         Args:
-        - name (str): The name of the node to find ancestors for.
-        - gamma (float or str): The gamma value to use for kernel computation. If set to "auto", the gamma value will be
-            automatically determined based on the interpolatory property of the active modes.
-        - gamma_min (float): The minimum gamma value to use for kernel computation.
-        - kernel_chooser (callable): A function that takes in a dictionary of kernel performances and returns the key of
-            the chosen kernel.
-        - mode_chooser (callable): A function that takes in a list of modes, a list of noises, and a list of Zs, and
-            returns the chosen mode.
-        - early_stopping (bool): Whether to use early stopping during ancestor pruning.
+            kernel: The kernel used for ancestor finding.
+            ancestor_finding_step_funcs: function used for ancestor finding.
+            X: The input data.
+            active_modess_kernel: The active modes.
+            gas_kernel: The target vectors
+            ybs_kernel: The regression coefficients
+            gammas_kernel: The gammas
+            subkeys_kernel: The subkeys
+            noise_kernel: The noise to signal ratios ratios
+            Z_low_kernel: The Z_lows
+            Z_high_kernel: The Z_highs
+            loop_number: The number of iterations for ancestor finding.
+            message: Additional message to display during ancestor finding.
 
         Returns:
-        - None
+            A tuple containing the following arrays, each aggregating all the values encountered during the ancestor finding process:
+            - ancestor_modess: An array of ancestor modes.
+            - noisess_kernel: An array of noise to signal ratios.
+            - Z_lows_kernel: An array of Z lows
+            - Z_highs_kernel: An array of Z highs
+            - activationss_kernel: An array of activations
+            - gammas: An array of gammas.
+            - ybs: An array of regression coefficients.
         """
-        # setup
-        ga, active_modes = self._prepare_modes_for_ancestor_finding(name)
+        ancestor_modess = [np.sum(active_modess_kernel, axis=1)]
+        noisess_kernel = [noise_kernel]
+        Z_lows_kernel = [Z_low_kernel]
+        Z_highs_kernel = [Z_high_kernel]
+        gammas = [gammas_kernel]
+        ybs = [ybs_kernel]
+        activationss_kernel = []
 
-        # finding the kernel (step 3 - 9 in the paper)
-        kernel_performance = GraphDiscovery._compute_kernel_preformances(
-            gamma=gamma,
-            gamma_min=gamma_min,
-            active_modes=active_modes,
-            ga=ga,
-            printer=self.print_func,
+        pbar = tqdm(
+            total=loop_number,
+            desc=f"Finding ancestors with kernel [{kernel}]",
+            position=0,
+            leave=True,
         )
-        which = kernel_chooser(kernel_performance)
+        pbar.set_postfix_str(message)
+        ancestor_finding_step = ancestor_finding_step_funcs[kernel]
+        for step in range(loop_number):
+            # because of the very high number of ancestor, gamma_min needs to be recomputed often, to avoid numerical instability
+            # and keep it as small as possible
+            p = X.shape[1] - step - 1
+            if step % 50 == 0 or (p * (p + 1)) / 2 == X.shape[1]:
+                K_mat = self.vmaped_kernel[kernel](
+                    self.X, self.X, np.sum(active_modess_kernel, axis=1)
+                )
 
-        if which is None:  # case no ancestors, step 7 in the paper
-            self.print_func(f"{name} has no ancestors\n")
-            return
-        self.print_func(
-            f"{name} has ancestors with {which} kernel (n/(s+n)={kernel_performance[which]['noise']:.2f})"
+                min_eigenvalue = np.linalg.eigvalsh(K_mat)[:, 0]
+                gamma_min_kernel = np.where(
+                    min_eigenvalue + 1e-9 < 0, -2 * min_eigenvalue, 1e-9
+                )
+
+            (
+                active_modess_kernel,
+                ybs_kernel,
+                gammas_kernel,
+                subkeys_kernel,
+                activations,
+                noise,
+                Z_low,
+                Z_high,
+            ) = ancestor_finding_step(
+                X,
+                active_modess_kernel,
+                gas_kernel,
+                gammas_kernel,
+                ybs_kernel,
+                subkeys_kernel,
+                gamma_min_kernel,
+            )
+            ancestor_modess.append(np.sum(active_modess_kernel, axis=1))
+            noisess_kernel.append(noise)
+            Z_lows_kernel.append(Z_low)
+            Z_highs_kernel.append(Z_high)
+            activationss_kernel.append(activations)
+            gammas.append(gammas_kernel)
+            ybs.append(ybs_kernel)
+            pbar.update(1)
+            if np.all(active_modess_kernel == 0):
+                break
+        pbar.close()
+        return (
+            np.stack(ancestor_modess, axis=1),
+            np.stack(noisess_kernel, axis=1),
+            np.stack(Z_lows_kernel, axis=1),
+            np.stack(Z_highs_kernel, axis=1),
+            np.stack(activationss_kernel, axis=1),
+            np.stack(gammas, axis=1),
+            np.stack(ybs, axis=1),
         )
-        active_modes.set_level(which)
 
-        # pruning ancestors (step 10 - 17 in the paper)
-
-        (
-            list_of_modes,
-            noises,
-            Zs,
-            list_of_activations,
-        ) = GraphDiscovery._iterative_ancestor_pruner(
-            ga=ga,
-            modes=active_modes,
-            printer=self.print_func,
-            early_stopping=early_stopping,
-            gamma_min=gamma_min,
-            yb=kernel_performance[which]["yb"],
-            noise=kernel_performance[which]["noise"],
-            Z=kernel_performance[which]["Z"],
-            gamma=(
-                None
-                if gamma == "auto"
-                and active_modes.is_interpolatory()  # if gamma is "auto" and the modes are interpolatory, gamma is recomputed at each step.
-                else kernel_performance[which]["gamma"]
-            ),  # If the modes are not interpolatory, we keep the gamma found above
-        )
-        # choosing ancestors (step 18 in the paper)
-        ancestor_modes = mode_chooser(list_of_modes, noises, Zs)
-        # plot evolution of noise and Z, and in second plot on the side evolution of Z_{k+1}-Z_k
-        ancestor_number = [mode.node_number for mode in list_of_modes]
-        fig, axes = plot_noise_evolution(
-            ancestor_number,
-            noises,
-            Zs,
-            ancestor_modes,
-        )
-        plt.show()
-
-        # adding ancestors to graph and storing activations (step 19)
-        activations = list_of_activations[-ancestor_modes.node_number]
-        activations = {"/".join(key): value for key, value in activations}
-
-        self.print_func("ancestors after pruning: ", ancestor_modes, "\n")
-        for ancestor_name, used in ancestor_modes.used.items():
-            if used:
-                activation = activations[
-                    "/".join(ancestor_modes.get_cluster_of_node_name(ancestor_name))
-                ]
-                self.G.add_edge(ancestor_name, name, type=which, signal=activation)
-
-    def _iterative_ancestor_pruner(
-        ga, modes, gamma, yb, noise, Z, printer, early_stopping, gamma_min
+    def process_results(
+        self,
+        targets,
+        chosen_kernel,
+        mask_kernel,
+        chosen_modes,
+        ancestor_modess,
+        noisess,
+        Z_lows,
+        Z_highs,
+        activationss,
+        kernel_performances,
+        gammas,
+        ybs_kernel,
     ):
         """
-        Iteratively prunes the ancestor clusters of a hypergraph until only one cluster remains.
-        The pruning is done by removing the cluster with the lowest activation energy.
-        See the paper for more details on the pruning procedure.
-        The function returns the list of modes, noises, Zs, and list_of_activations at each iteration.
+        Process the results of the hypergraph discovery algorithm.
 
         Args:
-        - ga (numpy.ndarray): The data of the node for which the ancestors are being pruned.
-        - modes (Modes): Modes of the GraphDiscovery.
-        - gamma (float): The regularization parameter.
-        - yb (numpy.ndarray): The solution of the original regression performed to find the kernel in _find_ancestors.
-        - noise (float): The noise level of the original regression performed to find the kernel in _find_ancestors.
-        - Z (tuple): The Z value of the original regression performed to find the kernel in _find_ancestors.
-        - printer (function): The function used to print the progress.
-        - early_stopping (EarlyStopping): The function used to determine if the pruning should stop early.
-        - gamma_min (float): The minimum value of gamma.
+            targets (list): List of target names.
+            chosen_kernel (int): Index of the chosen kernel.
+            mask_kernel (list): List of boolean values indicating whether each target has a mask.
+            chosen_modes (list): List of chosen modes for each target.
+            ancestor_modess (list): List of ancestor modes for each target.
+            noisess (list): List of noise values for each target and mode.
+            Z_lows (list): List of lower bounds of Z values for each target and mode.
+            Z_highs (list): List of upper bounds of Z values for each target and mode.
+            activationss (list): List of activation values for each target and mode.
+            kernel_performances (list): List of kernel performances for each target and mode.
+            gammas (ndarray): Array of gamma values for each target and mode.
+            ybs_kernel (ndarray): Array of yb values for each target and mode.
 
         Returns:
-        - list_of_modes (list): The list of cluster trees at each iteration.
-        - noises (list): The list of noise levels at each iteration.
-        - Zs (list): The list of Z values at each iteration.
-        - list_of_activations (list): The list of activations at each iteration.
+            None
         """
-        noises = [noise]
-        Zs = [Z]
-        list_of_modes = [modes]
-        list_of_activations = []
-        active_modes = modes
-        active_yb = yb
-        # entering loop (step 19 in the paper)
-        while active_modes.node_number > 1 and not early_stopping(
-            list_of_modes, noises, Zs
+        index = 0
+        for (
+            name,
+            mask,
+            *kernel_performance,
+        ) in zip(
+            targets,
+            mask_kernel,
+            *kernel_performances,
         ):
-            # Computing activations and finding least important ancestor (step 14 in the paper)
-            energy = -np.dot(ga, active_yb)
-            activations = [
-                (
-                    cluster,
-                    np.dot(
-                        active_yb, active_modes.get_K_of_cluster(cluster) @ active_yb
-                    )
-                    / energy,
+            if not mask:
+                continue
+            self.print_func(f"\nResults for {name}")
+            _, noises_kernel, Z_lows_kernels, Z_highs_kernels, gammas_kernel, _ = (
+                kernel_performance
+            )
+            for i, kernel in enumerate(self.kernels):
+                self.print_func(
+                    f"Kernel [{kernel}] has n/(n+s)={noises_kernel[i]}, Z=({Z_lows_kernels[i]:.2f}, {Z_highs_kernels[i]:.2f}), gamma={max(self.gamma_min,gammas_kernel[i]):.2e}"
                 )
-                for cluster in active_modes.active_clusters
-            ]
-            list_of_activations.append(activations)
-            minimum_activation_cluster = min(activations, key=lambda x: x[1])[0]
-            # delete least important ancestor cluster (step 15 in the paper)
-            active_modes = active_modes.delete_cluster(minimum_activation_cluster)
-            # find new noise and regression solution (step 13 in the paper)
-            list_of_modes.append(active_modes)
-            (
-                yb,
-                noise,
-                (Z_low, Z_high),
-                gamma_used,
-            ) = GraphDiscovery._perform_regression(
-                K=active_modes.get_K(),
-                gamma=gamma,
-                gamma_min=gamma_min,
-                ga=ga,
-                printer=printer,
-                interpolatory=active_modes.is_interpolatory(),
+
+            if chosen_kernel == -1:  # case no ancestors, step 7 in the paper
+                self.print_func(f"{name} has no ancestors\n")
+                index += 1
+                continue
+
+            chosen_mode = chosen_modes[index]
+            ancestor_modes = ancestor_modess[index]
+            noises = noisess[index]
+            Z_low = Z_lows[index]
+            Z_high = Z_highs[index]
+            activations = activationss[index]
+            gamma = gammas[index, chosen_mode]
+            yb = ybs_kernel[index, chosen_mode]
+            self.print_func(
+                f"{name} has ancestors with the kernel [{self.kernels[chosen_kernel]}] | (n/(s+n)={float(noisess[index][chosen_mode]):.2f} after pruning)"
             )
-            noises.append(noise)
-            Zs.append((Z_low, Z_high))
-            active_yb = yb
-            printer(
-                f"ancestors : {active_modes}\n using gamma={gamma_used:.2e}, n/(n+s)={noise:.2f}, Z={Z_low:.2f}"
+
+            # plot evolution of noise and Z, and in second plot on the side evolution of Z_{k+1}-Z_k
+            ancestor_number = [np.sum(mode) for mode in ancestor_modes]
+            fig, axes = plot_noise_evolution(
+                ancestor_number,
+                noises,
+                [(Zl, Zh) for Zl, Zh in zip(Z_low, Z_high)],
+                node_name=name,
+                ancestor_modes_number=ancestor_number[chosen_mode],
             )
-        # adding last activation after exiting the loop
-        if active_modes.node_number == 1:
-            list_of_activations.append([(active_modes.active_clusters[0], 1 - noise)])
-        else:
-            # same computation as above, case of early stopping
-            list_of_activations.append(
-                [
-                    (
-                        name,
-                        np.dot(
-                            active_yb, active_modes.get_K_of_cluster(name) @ active_yb
-                        )
-                        / energy,
-                    )
-                    for name in active_modes.active_clusters
-                ]
+            plt.show()
+            plt.close(fig)
+
+            # adding ancestors to graph and storing activations (step 19)
+            acivation_per_variable = np.sum(
+                self.modes.index_matrix * activations[chosen_mode][:, None], axis=0
             )
-        return list_of_modes, noises, Zs, list_of_activations
-
-    def _compute_kernel_preformances(gamma, gamma_min, active_modes, ga, printer):
-        """
-        Computes the performance of each kernel in `active_modes` by performing regression with the given parameters.
-        This will allow us to choose the kernel to use for each node.
-
-        Args:
-        - gamma (float or str): The regularization parameter for the regression. If "auto", it will be automatically determined.
-        - gamma_min (float): The minimum value of gamma to consider.
-        - active_modes (Modes): The active modes object containing the kernels to evaluate.
-        - ga (np.ndarry): The data of the node for which the ancestors are being pruned.
-        - printer (callable): A function to print the results.
-
-        Returns:
-        - dict: A dictionary containing the performance metrics for each kernel.
-        """
-        kernel_performances = {}
-        for which in active_modes.matrices_names:
-            (
-                yb,
-                noise,
-                (Z_low, Z_high),
-                gamma_used,
-            ) = GraphDiscovery._perform_regression(
-                K=active_modes.get_K(which),
-                gamma=None if gamma == "auto" else gamma,
-                gamma_min=gamma_min,
-                ga=ga,
-                printer=printer,
-                interpolatory=active_modes.is_interpolatory(which),
+            active_variables = ancestor_modes[chosen_mode]
+            self.G.nodes[name].update(
+                {
+                    "active_modes": active_variables,
+                    "kernel_index": chosen_kernel,
+                    "type": str(self.kernels[chosen_kernel]),
+                    "gamma": float(gamma),
+                    "noise": float(noises[chosen_mode]),
+                    "coeff": yb,
+                }
             )
-            printer(
-                f"{which} kernel (using gamma={gamma_used:.2e})\n n/(n+s)={noise:.2f}, Z={Z_low:.2f}"
-            )
-            kernel_performances[which] = {
-                "noise": noise,
-                "Z": (Z_low, Z_high),
-                "yb": yb,
-                "gamma": gamma_used,
-            }
-        return kernel_performances
+            ancestor_names = []
+            for i, (activation, active) in enumerate(
+                zip(acivation_per_variable, active_variables)
+            ):
+                if active == 1:
+                    ancestor_names.append(self.names[i])
+                    self.G.add_edge(self.names[i], name, signal=activation)
+                elif active == 0:
+                    continue
+                else:
+                    raise ValueError("Inconsistent activation")
 
-    def _perform_regression(
-        K, ga, gamma=None, gamma_min=None, printer=None, interpolatory=None
-    ):
-        """
-        Perform a Kernel Ridge Regression on the given data using the kernel matrix K and the target values ga.
+            self.print_func(f"Ancestors of {name}: {ancestor_names}\n")
 
-        If gamma is not provided, it is computed using the _find_gamma method with the given parameters.
-        If gamma is provided, gamma_min, printer and interpolatory are ignored.
-
-        The regression is performed by solving a variationnal problem using the cholesky factorization of K.
-
-        Args:
-        - K (np.ndarray): Kernel matrix of the chosen kernel.
-        - gamma (float or str): The regularization parameter for the regression. If "auto", it will be automatically determined.
-        - gamma_min (float): The minimum value of gamma to consider.
-        - ga (np.ndarry): The data of the node for which the ancestors are being pruned.
-        - printer (callable): A function to print the results.
-        - interpolatory (bool): Whether the kernel is interpolatory.
-
-        Returns:
-        - yb (np.ndarray): The solution of the regression.
-        - noise (float): The noise level of the regression.
-        - (Z_low, Z_high) (tuple): The Z values of the regression.
-        - gamma (float): The gamma value used for the regression.
-
-        """
-        if gamma is None:
-            assert gamma_min is not None, "if gamma is None, gamma_min must be provided"
-            assert printer is not None, "if gamma is None, printer must be provided"
-            assert (
-                interpolatory is not None
-            ), "if gamma is None, interpolatory must be provided"
-            gamma = GraphDiscovery._find_gamma(
-                K=K,
-                interpolatory=interpolatory,
-                Y=ga,
-                tol=1e-10,
-                printer=printer,
-                gamma_min=gamma_min,
-            )
-        K += gamma * np.eye(K.shape[0])
-        c, low = scipy.linalg.cho_factor(K)
-        yb, noise = GraphDiscovery._solve_variationnal(
-            ga, gamma=gamma, cho_factor=(c, low)
-        )
-        Z_low, Z_high = GraphDiscovery._Z_test(gamma, cho_factor=(c, low))
-        return yb, noise, (Z_low, Z_high), gamma
-
-    def _solve_variationnal(ga, gamma, cho_factor):
-        """
-        Solves a yb=-K^-1@ga  problem using the Cholesky factorization of K, and gives noise
-
-        Args:
-        - ga(np.ndarray): A numpy array representing the input matrix.
-        - gamma(float): A float representing the gamma value.
-        - cho_factor(tuple): output of scipy.linalg.cho_factor(K)
-
-        Returns:
-        - yb(np.ndarray): A numpy array representing the solution to the variationnal problem.
-        - noise(float): A float representing the noise value.
-        """
-        yb = -scipy.linalg.cho_solve(cho_factor, ga)
-        noise = -gamma * np.dot(yb, yb) / np.dot(ga, yb)
-        return yb, noise
-
-    def _Z_test(gamma, cho_factor):
-        """
-        Computes the Z-test for the given gamma and cho_factor.
-
-        Args:
-        - gamma (float): The gamma value.
-        - cho_factor (tuple): The cho_factor tuple.
-
-        Returns:
-        - tuple: A tuple containing the 5th percentile and 95th percentile of the B_samples.
-        """
-        N = 100
-        samples = gamma * np.random.normal(size=(N, cho_factor[0].shape[0]))
-        B_samples = np.array(
-            [
-                GraphDiscovery._solve_variationnal(sample, gamma, cho_factor)[1]
-                for sample in samples
-            ]
-        )
-        return np.sort(B_samples)[int(0.05 * N)], np.sort(B_samples)[int(0.95 * N)]
-
-    def _find_gamma(K, interpolatory, Y, gamma_min, printer, tol=1e-10):
-        """
-        Finds the gamma value for regression problem
-        If the kernel is interpolatory, the gamma value is found by maximising the variance of the eigenvalues of gamma*(K+gamma*I)^-1
-        If the kernel is not interpolatory, the gamma value is the residuals of the regression problem
-
-        Args:
-        - K (numpy.ndarray): The kernel matrix.
-        - interpolatory (bool): Whether the kernel is interpolatory or not.
-        - Y (numpy.ndarray): The target vector, also called ga.
-        - gamma_min (float): The minimum value of gamma.
-        - printer (function): The function to print messages.
-        - tol (float): The tolerance value for the optimisation algorithm.
-
-        Returns:
-        - float: The gamma value.
-        """
-        eigenvalues, eigenvectors = np.linalg.eigh(K)
-        if not interpolatory:
-            selected_eigenvalues = eigenvalues < tol
-            residuals = (
-                eigenvectors[:, selected_eigenvalues]
-                @ (eigenvectors[:, selected_eigenvalues].T)
-            ) @ Y
-            gamma = np.linalg.norm(residuals) ** 2
-        else:
-
-            def var(gamma_log):
-                return -np.var(1 / (1 + eigenvalues * np.exp(-gamma_log)))
-
-            res = minimize(
-                var,
-                np.array([np.log(np.mean(eigenvalues))]),
-                method="nelder-mead",
-                options={"xatol": 1e-8, "disp": False},
-            )
-            gamma = np.exp(res.x[0])
-            gamma_med = np.median(eigenvalues)
-            if not (res.success) or not (gamma_med / 100 < gamma < 100 * gamma_med):
-                printer(
-                    f"auto gamma through variance maximisation seem to have failed (found gamma={gamma:.2e}). Relying on eigenvalue median instead (gamma={gamma_med:.2e})"
-                )
-                gamma = gamma_med
-
-        if gamma < gamma_min:
-            printer(
-                f"""gamma too small for set gamma_min ({gamma:.2e}) needed for numerical stability, using {gamma_min:.2e} instead\nThis can either mean that the noise is very low or there is an issue in the automatic determination of gamma. To change the tolerance, change parameter gamma_min"""
-            )
-            gamma = gamma_min
-
-        return gamma
+            index += 1
 
     def plot_graph(self, type_label=True, **kwargs):
         """
@@ -722,3 +863,43 @@ class GraphDiscovery:
                 self.G, pos, edge_labels=nx.get_edge_attributes(self.G, "type")
             )
         plt.xlim(x_min - x_margin, x_max + x_margin)
+
+    def predict(self, names, X_pred):
+        assert X_pred.shape[1] == self.X.shape[1]
+        res = np.zeros((X_pred.shape[0], len(names)))
+
+        # apply mean and std transform
+        X_pred_used = (X_pred - self.mean_x) / self.std_x
+
+        k_dic = nx.get_node_attributes(self.G, "kernel_index")
+        kernels = np.array([k_dic.get(name, -1) for name in names])
+        active_mode_dic = nx.get_node_attributes(self.G, "active_modes")
+        active_modess = np.stack(
+            [
+                active_mode_dic.get(
+                    name,
+                    np.zeros(
+                        self.X.shape[1],
+                    ),
+                )
+                for name in names
+            ],
+            axis=0,
+        )
+        yb_dic = nx.get_node_attributes(self.G, "coeff")
+        ybs = np.stack(
+            [yb_dic.get(name, np.zeros(self.X.shape[0])) for name in names], axis=0
+        )
+
+        for i, kernel in enumerate(self.kernels):
+            mask = kernels == i
+            if not np.any(mask):
+                continue
+            K_mat = self.vmaped_kernel[kernel](X_pred_used, self.X, active_modess[mask])
+            pred = np.einsum("nij,nj->in", K_mat, -ybs[mask])
+            res = res.at[:, mask].set(pred)
+        # transform the result back
+        indexes = np.array([self.name_to_index[name] for name in names])
+        res = res * self.std_x[:, indexes] + self.mean_x[:, indexes]
+
+        return res

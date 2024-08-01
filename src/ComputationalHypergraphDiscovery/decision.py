@@ -1,6 +1,8 @@
 from typing import Any
 import matplotlib.pyplot as plt
 from .util import plot_noise_evolution
+import jax.numpy as np
+import jax
 
 
 class KernelChooser:
@@ -37,17 +39,28 @@ class MinNoiseKernelChooser(KernelChooser):
     def __init__(self):
         pass
 
-    def __call__(self, kernel_choice_dict):
+    def __call__(self, kernel_perfs):
         """
         Chooses the kernel with least noise and such that noise is lower than random noise Z
         """
-        current = None
-        noise = 2
-        for kernel, vals in kernel_choice_dict.items():
-            if vals["noise"] < noise and vals["noise"] < vals["Z"][0]:
-                current = kernel
-                noise = vals["noise"]
-        return current
+        ybs, noises, Z_lows, Z_highs, gammas, keys = kernel_perfs
+
+        # Create a mask for conditions where noise is less than Z_low
+        valid_indices = noises < Z_lows
+        is_valid = np.any(valid_indices)
+
+        # Use jnp.where to find the first valid index, default to -1 if no valid index
+        selected_index = np.argmin(np.where(valid_indices, noises, 2))
+
+        return (
+            selected_index * is_valid - 1 * (1 - is_valid),
+            ybs[selected_index],
+            noises[selected_index],
+            Z_lows[selected_index],
+            Z_highs[selected_index],
+            gammas[selected_index],
+            keys[selected_index],
+        )
 
 
 class ThresholdKernelChooser(KernelChooser):
@@ -61,97 +74,30 @@ class ThresholdKernelChooser(KernelChooser):
     def __init__(self, threshold):
         self.threshold = threshold
 
-    def __call__(self, kernel_choice_dict):
-        for kernel in kernel_choice_dict.keys():
-            if kernel_choice_dict[kernel]["noise"] < self.threshold:
-                return kernel
-        return None
+    def __call__(self, kernel_perfs):
 
+        ybs, noises, Z_lows, Z_highs, gammas, keys = kernel_perfs
 
-class CustomKernelChooser(KernelChooser):
-    """
-    A custom kernel chooser that allows for a user-defined function to choose a kernel.
+        # Create a mask for noises less than the threshold
+        valid_indices = noises < self.threshold
 
-    Args:
-    - chooser_function (callable): A function that takes a dictionary of kernel choices and returns
-        the chosen kernel. The function must return None or a key of the input dictionary.
+        # Indices where valid, else set to an out-of-range index
+        indices = np.where(valid_indices, np.arange(noises.shape[0]), noises.shape[0])
 
+        # Find the minimum index that is valid
+        selected_index = np.min(indices)
 
-    Once the custom kernel chooser is initialized, it can be called with a dictionary of kernel choices.
-    The custom function is then called with the input dictionary as argument, and the chosen kernel is returned.
+        is_valid = selected_index < noises.shape[0]
 
-    """
-
-    def __init__(self, chooser_function):
-        self.choice_function = chooser_function
-
-    def __call__(self, kernel_choice_dict):
-        """
-        Given a dictionary of kernel choices, returns the kernel chosen by the custom function.
-
-        Args:
-        - kernel_choice_dict (dict): A dictionary where keys are kernel names and values are scores.
-
-        Returns:
-        - str: The name of the chosen kernel.
-
-        Raises:
-        - AssertionError: If the chosen kernel is not in the dictionary.
-        """
-        res = self.choice_function(kernel_choice_dict)
-        assert (
-            res is None or res in kernel_choice_dict.keys()
-        ), f"invalid choice of kernel from custom function: {res}"
-        return res
-
-
-class ManualKernelChooser(KernelChooser):
-    """
-    A class used to choose a kernel manually. Input "STOP" to raise an error and exit loop
-
-    ...
-
-    Methods
-    -------
-    __call__(kernel_choice_dict):
-        Allows the user to choose a kernel from a dictionary of available kernels.
-
-    """
-
-    def __init__(self):
-        pass
-
-    def __call__(self, kernel_choice_dict):
-        """Prompt the user to choose a kernel from a dictionary of kernel choices.
-
-        Args:
-        - kernel_choice_dict (dict): A dictionary of kernel choices, where each key is a kernel name and each value is a dictionary containing the kernel's noise and Z values.
-
-        Returns:
-        - str: The name of the chosen kernel.
-
-        Raises:
-        - Exception: If the user enters "STOP".
-        - AssertionError: If the user enters an invalid kernel choice.
-        """
-
-    def __call__(self, kernel_choice_dict):
-        while True:
-            input_string = ""
-            for kernel in kernel_choice_dict.keys():
-                input_string += f"{kernel} kernel: noise:{kernel_choice_dict[kernel]['noise']:.2f},Z:{kernel_choice_dict[kernel]['Z'][0]:.2f}\n"
-            choice = input(input_string)
-            try:
-                if choice == "None":
-                    return None
-                assert (
-                    choice in kernel_choice_dict.keys()
-                ), f"invalid choice of kernel: {choice}. Your choice must be either 'None' or in {kernel_choice_dict.keys()} \nWrite 'STOP' to stop the program"
-                return choice
-            except AssertionError as e:
-                if choice == "STOP":
-                    raise Exception("User stopped the program")
-                print(e)
+        return (
+            selected_index * is_valid - 1 * (1 - is_valid),
+            ybs[selected_index],
+            noises[selected_index],
+            Z_lows[selected_index],
+            Z_highs[selected_index],
+            gammas[selected_index],
+            keys[selected_index],
+        )
 
 
 class ModeChooser:
@@ -175,7 +121,7 @@ class ModeChooser:
     def __init__(self):
         pass
 
-    def is_a_modeChooser(self):
+    def is_a_mode_chooser(self):
         return True
 
     def __call__(self, *args: Any, **kwds: Any) -> Any:
@@ -202,48 +148,11 @@ class MaxIncrementModeChooser(ModeChooser):
         pass
 
     def __call__(self, list_of_modes, list_of_noises, list_of_Zs):
-        increments = [
-            list_of_noises[i + 1] - list_of_noises[i]
-            for i in range(len(list_of_noises) - 1)
-        ] + [1 - list_of_noises[-1]]
-        if len(increments) == 0:
-            return list_of_modes[0]
-        argmax = max(range(len(increments)), key=lambda i: increments[i])
-        return list_of_modes[argmax]
+        increments = list_of_noises[1:] - list_of_noises[:-1]
 
-
-class CustomModeChooser(ModeChooser):
-    """
-    A custom mode chooser that selects a mode from a list of modes based on a given function.
-
-    Args:
-        chooser_function (callable): A function that takes in a list of modes, a list of noises, and a list of Zs, and returns a selected mode.
-
-    """
-
-    def __init__(self, chooser_function):
-        self.choice_function = chooser_function
-
-    def __call__(self, list_of_modes, list_of_noises, list_of_Zs):
-        """
-        Given a list of modes, a list of noises, and a list of Zs, returns the mode selected by the choice function.
-
-        Args:
-        - list_of_modes (list): A list of modes.
-        - list_of_noises (list): A list of noises.
-        - list_of_Zs (list): A list of Zs.
-
-        Returns:
-        - The mode selected by the choice function.
-
-        Raises:
-        - AssertionError: If the result is not one of the modes in list_of_modes.
-        """
-        res = self.choice_function(list_of_modes, list_of_noises, list_of_Zs)
-        assert (
-            res in list_of_modes
-        ), f"The result must be one of the modes in list_of_modes, got : {res}"
-        return res
+        # Append the increment from the last noise to 1 (assuming 1 is a boundary or a limit)
+        increments = np.append(increments, 1 - list_of_noises[-1])
+        return np.argmax(increments)
 
 
 class ThresholdModeChooser(ModeChooser):
@@ -274,69 +183,13 @@ class ThresholdModeChooser(ModeChooser):
         Raises:
         - Exception: If no mode is found with a noise level below the threshold.
         """
-        for i, mode in enumerate(list_of_modes):
-            if list_of_noises[i] < self.threshold:
-                return mode
-        raise Exception("Unexpectedly found no mode")
-
-
-class ManualModeChooser(ModeChooser):
-    """
-    A class that allows the user to manually choose the number of ancestors for a given mode.
-    """
-
-    def __init__(self):
-        pass
-
-    def __call__(self, list_of_modes, list_of_noises, list_of_Zs):
-        """
-        This method takes a list of modes, a list of corresponding noise levels, and a list of corresponding Z values,
-        and returns a chosen mode based on user input.
-
-        Args:
-        - list_of_modes (list): A list of modes.
-        - list_of_noises (list): A list of noises.
-        - list_of_Zs (list): A list of Zs.
-
-        Returns:
-        - list_of_modes[chosen_index] (object): The chosen mode.
-        """
-        suggested_mode = MaxIncrementModeChooser()(
-            list_of_modes, list_of_noises, list_of_Zs
+        is_under_threshold = list_of_noises < self.threshold
+        valid_indices = np.where(
+            is_under_threshold, np.arange(list_of_noises.shape[0]), -1
         )
-        while True:
-            ancestor_number = [mode.node_number for mode in list_of_modes]
-            fig, axes = plot_noise_evolution(
-                ancestor_number, list_of_noises, list_of_Zs, suggested_mode
-            )
-            plt.show(block=False)
-
-            choice = input(
-                f"Choose number of ancestors. Suggested ={suggested_mode.node_number} "
-            )
-            try:
-                chosen_index = ancestor_number.index(int(choice))
-                fig, axes = plot_noise_evolution(
-                    ancestor_number,
-                    list_of_noises,
-                    list_of_Zs,
-                    list_of_modes[chosen_index],
-                )
-                plt.show(block=False)
-                assert "Y" == input(
-                    "Confirm choice by pressing Y, otherwise press any other key"
-                )
-                return list_of_modes[chosen_index]
-            except ValueError as e:
-                print(
-                    f"invalid choice of ancestor number: {choice}. Your choice must be in {ancestor_number} \nWrite 'STOP' to stop the program"
-                )
-            except AssertionError as e:
-                print("user did not confirm choice, try again")
-            except Exception as e:
-                if choice == "STOP":
-                    raise Exception("User stopped the program")
-                print(e)
+        return jax.lax.select(
+            np.any(is_under_threshold), np.max(valid_indices), np.argmin(list_of_noises)
+        )
 
 
 class EarlyStopping:

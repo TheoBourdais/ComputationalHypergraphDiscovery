@@ -158,3 +158,13 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+#*.pkl
+*.npy
+examples/.DS_Store
+examples/Chemistry-Big/.DS_Store
+examples/Chemistry-Big/data_generation/.DS_Store
+examples/Chemistry-Big/data_generation/runs/.DS_Store
+examples/Chemistry-Big/data_generation/runs/2024_05_27__13_42_06/.DS_Store
+examples/Chemistry-Big/data_and_results/BCR.csv
+examples/Chemistry-Big/data_and_results/BCR_uniform.csv
+examples/Chemistry-Big/process big chemical reaction + generate noise plots.ipynb

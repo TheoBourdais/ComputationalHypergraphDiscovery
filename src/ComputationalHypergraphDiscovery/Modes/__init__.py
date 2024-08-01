@@ -9,13 +9,5 @@ Submodules:
 
 For more detailed information on each submodule, use help() on the respective submodule."""
 
-from .kernels import (
-    ModeKernelList,
-    ModeKernel,
-    LinearMode,
-    QuadraticMode,
-    GaussianMode,
-    SklearnMode,
-    PreComputedMode,
-)
+from .kernels import ModeKernel, LinearMode, QuadraticMode, GaussianMode
 from .container import ModeContainer
