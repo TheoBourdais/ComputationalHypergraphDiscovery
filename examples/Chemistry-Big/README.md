@@ -1,5 +1,7 @@
 # Big chemistry example
 
+**Warning**: To properly reproduce the results of the paper, you must switch to the [BCR example branch](https://github.com/TheoBourdais/ComputationalHypergraphDiscovery/tree/BCR-example).
+
 In this example, we tackle a large scale example with 1122 variables and their derivatives. The data is generated using the BCR benchmark from the [Catalyst repository](https://github.com/SciML/Catalyst_PLOS_COMPBIO_2023). The folder is organized as follows:
 - `data_generation`: files used for the data generation process
 - `data_and_results`: data used for the CHD process, and resulting graphs stored
