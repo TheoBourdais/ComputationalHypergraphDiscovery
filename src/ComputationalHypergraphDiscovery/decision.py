@@ -27,7 +27,7 @@ class KernelChooser:
     def __init__(self):
         pass
 
-    def is_a_kernelChooser(self):
+    def is_a_kernel_chooser(self):
         return True
 
 
