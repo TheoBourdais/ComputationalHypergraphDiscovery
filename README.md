@@ -9,7 +9,7 @@
 
 
 
-This is the source code for the paper ["Computational Hypergraph Discovery: A Gaussian process framework for connecting the dots"][paper_url]. 
+This is the source code for the paper ["Codiscovering graphical structure and functional relationships within data: A Gaussian Process framework for connecting the dots"][paper_url]. 
 
 Please see the [companion blog post][blog_url] for a gentle introduction to the method and the code.
 
@@ -333,5 +333,5 @@ As a practitioner, you may have some knowledge about the data that you wish to u
 
 <!-- links -->
 
-[paper_url]: https://arxiv.org/abs/2311.17007
+[paper_url]: https://www.pnas.org/doi/10.1073/pnas.2403449121
 [blog_url]: https://theobourdais.github.io/posts/2023/11/CHD/

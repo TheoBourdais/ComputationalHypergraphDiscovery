@@ -5,7 +5,7 @@
 [![Python 3.11.4](https://img.shields.io/badge/python-3.11.4-blue.svg)](https://www.python.org/downloads/release/python-3114/)
 [![GitHub Repo](https://img.shields.io/badge/GitHub-Repo-red)](https://github.com/TheoBourdais/ComputationalHypergraphDiscovery)
 
-This is the source code for the paper ["Computational Hypergraph Discovery: A Gaussian process framework for connecting the dots"](https://arxiv.org/abs/2311.17007). 
+This is the source code for the paper ["Codiscovering graphical structure and functional relationships within data: A Gaussian Process framework for connecting the dots"](https://www.pnas.org/doi/10.1073/pnas.2403449121). 
 
 Please see the [companion blog post](https://theobourdais.github.io/posts/2023/11/CHD/) for a gentle introduction to the method and the code. See the repo [here](https://www.pnas.org/doi/10.1073/pnas.2403449121) for full documentation and examples.
 
