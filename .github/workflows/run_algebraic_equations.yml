@@ -31,7 +31,7 @@ jobs:
       run: |
         pwd
         ls -la
-        jupyter nbconvert --to notebook --execute ./examples/algebraic_equations_graph_discovery.ipynb --output ./executed_example.ipynb
+        jupyter nbconvert --to notebook --execute ./examples/Algebraic-equations/algebraic_equations_graph_discovery.ipynb --output ./executed_example.ipynb
         ls -la
     - name: Upload executed notebook as an artifact
       uses: actions/upload-artifact@v3
