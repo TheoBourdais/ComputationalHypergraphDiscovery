@@ -25,7 +25,7 @@ The code is written in Python 3 and requires the following packages:
 
 ### Using pip
 
-The code is available on PyPI and can be installed using pip:
+The code is available on [PyPI](https://pypi.org/project/ComputationalHypergraphDiscovery/) and can be installed using pip:
 
 ```bash
 pip install ComputationalHypergraphDiscovery
