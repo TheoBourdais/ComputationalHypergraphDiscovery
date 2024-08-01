@@ -5,6 +5,19 @@ from jax.scipy.optimize import minimize
 
 
 def perform_regression(K, ga, gamma, gamma_min, key):
+    """
+    Perform regression using the given parameters.
+
+    Args:
+        K (int): The value of K.
+        ga (float): The value of ga.
+        gamma (float): The value of gamma.
+        gamma_min (float): The minimum value of gamma.
+        key (str): The key value.
+
+    Returns:
+        The result of performing regression and finding gamma.
+    """
     return perform_regression_and_find_gamma(K=K, ga=ga, gamma_min=gamma_min, key=key)
 
 
@@ -19,17 +32,16 @@ def perform_regression_and_find_gamma(K, ga, gamma_min, key):
 
     Args:
     - K (np.ndarray): Kernel matrix of the chosen kernel.
-    - gamma (float or str): The regularization parameter for the regression. If "auto", it will be automatically determined.
     - gamma_min (float): The minimum value of gamma to consider.
     - ga (np.ndarry): The data of the node for which the ancestors are being pruned.
-    - printer (callable): A function to print the results.
-    - interpolatory (bool): Whether the kernel is interpolatory.
+    - key (jax.random.PRNGKey): The random key to use for the Z-test.
 
     Returns:
     - yb (np.ndarray): The solution of the regression.
     - noise (float): The noise level of the regression.
     - (Z_low, Z_high) (tuple): The Z values of the regression.
     - gamma (float): The gamma value used for the regression.
+    - key (jax.random.PRNGKey): The random key after the Z-test.
 
     """
     eigenvalues, eigenvectors = np.linalg.eigh(K)
@@ -45,18 +57,19 @@ def perform_regression_and_find_gamma(K, ga, gamma_min, key):
 
 def solve_variationnal(ga, gamma, eigenvalues, eigenvectors):
     """
-    Solves a yb=-K^-1@ga  problem using the Cholesky factorization of K, and gives noise
+    Solve the variational problem yb = -K^-1@ga using the eigendecomposition of K.
 
-    Args:
-    - ga(np.ndarray): A numpy array representing the input matrix.
-    - gamma(float): A float representing the gamma value.
-    - cho_factor(tuple): output of scipy.linalg.cho_factor(K)
+    Parameters:
+    ga (numpy.ndarray): The input vector ga.
+    gamma (float): The value of gamma.
+    eigenvalues (numpy.ndarray): The eigenvalues of matrix K.
+    eigenvectors (numpy.ndarray): The eigenvectors of matrix K.
 
     Returns:
-    - yb(np.ndarray): A numpy array representing the solution to the variationnal problem.
-    - noise(float): A float representing the noise value.
+    yb (numpy.ndarray): The solution vector yb.
+    noise (float): The noise term.
     """
-    # solve yb = -K^-1@ga using the eigendeomposition of K
+    # solve yb = -K^-1@ga using the eigendecomposition of K
     Pga = np.dot(eigenvectors.T, ga)
     coeffs = gamma / (eigenvalues + gamma)
     Pgacoeff = Pga * coeffs
@@ -72,7 +85,9 @@ def Z_test(gamma, eigenvalues, eigenvectors, key):
 
     Args:
     - gamma (float): The gamma value.
-    - cho_factor (tuple): The cho_factor tuple.
+    - eigenvalues (np.ndarray): The eigenvalues of the kernel matrix.
+    - eigenvectors (np.ndarray): The eigenvectors of the kernel matrix.
+    - key (jax.random.PRNGKey): The random key to use for the Z-test.
 
     Returns:
     - tuple: A tuple containing the 5th percentile and 95th percentile of the B_samples.
@@ -92,18 +107,14 @@ def Z_test(gamma, eigenvalues, eigenvectors, key):
 
 def find_gamma(eigenvalues):
     """
-    Finds the gamma value for regression problem by maximising the variance of the eigenvalues of gamma*(K+gamma*I)^-1
+    Finds the optimal value of gamma for a given set of eigenvalues.
 
-    Args:
-    - K (numpy.ndarray): The kernel matrix.
-    - interpolatory (bool): Whether the kernel is interpolatory or not.
-    - Y (numpy.ndarray): The target vector, also called ga.
-    - gamma_min (float): The minimum value of gamma.
-    - printer (function): The function to print messages.
-    - tol (float): The tolerance value for the optimisation algorithm.
+    Parameters:
+    - eigenvalues (array-like): The eigenvalues for which to find the optimal gamma.
 
     Returns:
-    - float: The gamma value.
+    - gamma (float): The optimal value of gamma.
+
     """
 
     def eigenvalue_variance(gamma_log):

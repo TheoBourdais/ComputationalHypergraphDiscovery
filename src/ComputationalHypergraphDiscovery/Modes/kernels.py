@@ -5,14 +5,7 @@ from copy import copy
 
 class ModeKernel:
     """
-    An interface representing a kernel for a mode in a hypergraph.
-    This is an abstract class that ressembles Sklearn's kernel interface, but also implements the methods necessary for kernel mode decomposition.
-
-    Attributes:
-    -----------
-    - beta_scale (float): The scaling factor for the kernel. See the help of ModeKernel.beta_scale for more details.
-    - is_interpolatory (bool): Whether the kernel is interpolatory or not. See the help of ModeKernel.is_interpolatory for more details.
-    - mode_type (str): The type of the mode kernel. Can be "individual", "pairwise" or "combinatorial". See the help of ModeKernel.mode_type for more details.
+    Represents a mode kernel used in computational hypergraph discovery.
     """
 
     def __init__(self) -> None:
@@ -43,6 +36,19 @@ class ModeKernel:
         return self.name
 
     def individual_influence(self, X, Y, which_dim, which_dim_only):
+        """
+        Calculates the individual influence of a given dimension on the kernel value.
+        This is the default way, allows to compute activations for any kernel but is slower in general.
+
+        Parameters:
+        - X: The input data.
+        - Y: The target data.
+        - which_dim: The dimension to calculate the influence for.
+        - which_dim_only: A binary value indicating whether to consider only the specified dimension.
+
+        Returns:
+        The individual influence of the specified dimension on the kernel value.
+        """
         whole_k = self(X, Y, which_dim)
         rest = which_dim * (1 - which_dim_only)
         rest_k = self(X, Y, rest)
@@ -58,19 +64,27 @@ class ModeKernel:
             return self
 
     def __rmul__(self, other):
-        """
-        Right multiplication of a kernel by a scalar. Same as left multiplication.
-        """
         return self.__mul__(other)
 
 
 class LinearMode(ModeKernel):
     """
-    Linear mode kernel.
-    This kernel is not interpolatory, and is applied to each column of the data matrix independently (individual type).
+    Linear mode kernel implementation.
 
     Args:
-    - name (str, optional): Name of the kernel. Defaults to None.
+    - memory_efficient_required (bool): Flag indicating whether memory-efficient mode is required. Default is False.
+
+    Attributes:
+    - hyperparameters (dict): Dictionary to store hyperparameters.
+    - _is_interpolatory (bool): Flag indicating whether the mode is interpolatory.
+    - _memory_efficient_required (bool): Flag indicating whether memory-efficient mode is required.
+    - name (str): Name of the mode.
+    - _scale (float): Scaling factor for the kernel.
+
+    Methods:
+    - setup(X, scales): Set up the kernel with the given data and scales.
+    - individual_influence(X, Y, which_dim, which_dim_only): Compute the influence of each individual data point on the prediction.
+
     """
 
     def __init__(self, memory_efficient_required=False) -> None:
@@ -82,6 +96,14 @@ class LinearMode(ModeKernel):
         self._scale = 2.0
 
     def setup(self, X, scales):
+        """
+        Set up the kernel with the given data and scales.
+
+        Args:
+        - X (np.array): The data matrix.
+        - scales (dict): Dictionary of scales for different modes.
+
+        """
         assert self.scale == scales[self.name]
 
         def vectorized_kernel(X, Y, which_dim):
@@ -113,20 +135,42 @@ class LinearMode(ModeKernel):
 
 class QuadraticMode(ModeKernel):
     """
-    Quadratic mode kernel.
-    This kernel is not interpolatory, and is applied to each pairs of column of the data matrix (pairwise type).
+    QuadraticMode is a class that represents a quadratic mode kernel.
 
-    Args:
-    - name (str, optional): Name of the kernel. Defaults to None.
+    Attributes:
+    - _is_interpolatory (bool): Indicates whether the mode kernel is interpolatory.
+    - name (str): The name of the mode kernel.
+    - _memory_efficient_required (bool): Indicates whether memory efficiency is required.
+
+    Methods:
+    - __init__(self, memory_efficient_required=False): Initializes a new instance of the QuadraticMode class.
+    - setup(self, X, scales): Sets up the mode kernel with the given data and scales.
+    - individual_influence(self, X, Y, which_dim, which_dim_only): Computes the influence of each individual data point on the prediction.
+
     """
 
     def __init__(self, memory_efficient_required=False) -> None:
+        """
+        Initializes a new instance of the QuadraticMode class.
+
+        Args:
+        - memory_efficient_required (bool): Indicates whether memory efficiency is required.
+
+        """
         super().__init__()
         self._is_interpolatory = False
         self.name = "quadratic"
         self._memory_efficient_required = memory_efficient_required
 
     def setup(self, X, scales):
+        """
+        Sets up the mode kernel with the given data and scales.
+
+        Args:
+        - X (np.array): The data matrix.
+        - scales (dict): The scales dictionary.
+
+        """
         assert self.scale == scales[self.name]
         try:
             scales["linear"]
@@ -166,21 +210,18 @@ class QuadraticMode(ModeKernel):
 
         Returns:
         - np.array: The influence of each data point on the prediction.
+
         """
         return self.kernel_only_var(X, Y, which_dim, which_dim_only)
 
 
 class GaussianMode(ModeKernel):
     """
-    Gaussian mode kernel.
-    This kernel is interpolatory, and of the combinatorial type, i.e. is applied to each columns of the data matrix,
-    after that for each subset of the columns, we take the product of the resulting kernel matrix.
-    This is then summed over all subsets, allowing to capture every possible combination of interactions between the columns.
+    Gaussian mode kernel implementation.
 
-    Parameters:
+    Args:
     - l (float): Length scale parameter.
-    - name (str, optional): Name of the kernel.
-
+    - memory_efficient_required (bool): Flag indicating whether memory efficiency is required. Default is True.
     """
 
     def __init__(self, l, memory_efficient_required=True) -> None:
@@ -193,6 +234,13 @@ class GaussianMode(ModeKernel):
         self.quadratic_part = QuadraticMode()
 
     def setup(self, X, scales):
+        """
+        Setup the Gaussian mode kernel.
+
+        Args:
+        - X (np.array): The data matrix.
+        - scales (dict): Dictionary of scales for different kernel components.
+        """
         assert self.scale == scales[self.name]
         self.quadratic_part._scale = scales["quadratic"]
         self.quadratic_part.setup(X, scales)

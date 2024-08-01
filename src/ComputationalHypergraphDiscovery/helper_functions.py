@@ -7,6 +7,16 @@ from .Modes import kernels as kClass
 
 
 def make_preprocessing_functions():
+    """
+    Creates and returns two preprocessing functions: remove_non_ancestors and remove_non_ancestors_no_adj.
+    These function setup the pruning process by taking the information on the nodesand removing nodes that should be ignored.
+    One of them takes into account an adjacency matrix, to handle if possible_edges was provided.
+
+    Returns:
+        remove_non_ancestors (function): A function that removes non-ancestors from the modes array based on the given index.
+        remove_non_ancestors_no_adj (function): A function that removes non-ancestors from the modes array without using the adjacency matrix.
+    """
+
     def remove_non_ancestors_no_adj(modes, index):
         non_ancestors_bool = np.arange(modes.shape[1]) == index
         cluster_mask = (modes == 1) * non_ancestors_bool[None, :]
@@ -28,6 +38,24 @@ def make_preprocessing_functions():
 
 
 def make_activation_function(kernel, scales, has_clusters, memory_efficient):
+    """
+    Create an function that computes the activations based on the given kernel, scales, and other parameters.
+    Significant speedups can be achieved when no cluster is present and the kernel is linear or quadratic.
+    for the gaussian kernel, it is possible to use a memory-efficient computation, if vmap uses too much memory.
+
+
+    Args:
+        kernel: The kernel object used for computing activations.
+        scales: A dictionary of scales for different modes.
+        has_clusters: A boolean indicating whether the kernel has clusters.
+        memory_efficient: A boolean indicating whether to use memory-efficient computation.
+
+    Returns:
+        The activation function.
+
+    Raises:
+        None.
+    """
     if isinstance(kernel, kClass.LinearMode) and not has_clusters:
 
         def get_vecs(X, which_dim_only, yb):
@@ -109,7 +137,20 @@ def make_activation_function(kernel, scales, has_clusters, memory_efficient):
 def make_find_ancestor_function(
     kernel, scales, has_clusters, is_interpolatory=None, memory_efficient=False
 ):
+    """
+    Creates a function that finds the ancestor of a given input based on certain parameters.
 
+    Args:
+        kernel: The kernel function used for computing activations.
+        scales: The scales between the different kernels.
+        has_clusters: A boolean indicating whether the graph has clusters.
+        is_interpolatory: A boolean indicating whether the kernel is interpolatory. If None, the value is determined based on the kernel.
+        memory_efficient: A boolean indicating whether to use memory-efficient computations.
+
+    Returns:
+        A function that finds the ancestor of a given input.
+
+    """
     get_activations_func = make_activation_function(
         kernel, scales, has_clusters, memory_efficient
     )

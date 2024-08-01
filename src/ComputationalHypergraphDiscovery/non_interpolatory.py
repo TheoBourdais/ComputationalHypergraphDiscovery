@@ -5,6 +5,18 @@ import jax
 
 
 def perform_regression_and_find_gamma(K, ga, gamma_min, key):
+    """
+    Performs regression and finds the optimal gamma value.
+
+    Args:
+        K (array-like): The input data.
+        ga (array-like): The target values.
+        gamma_min (float): The minimum value of gamma to consider.
+        key (str): The key for the regression.
+
+    Returns:
+        The result of the regression with the optimal gamma value.
+    """
     gamma = find_gamma(K=K, Y=ga)
     return perform_regression(K=K, ga=ga, gamma=gamma, gamma_min=gamma_min, key=key)
 
@@ -23,8 +35,7 @@ def perform_regression(K, ga, gamma, gamma_min, key):
     - gamma (float or str): The regularization parameter for the regression. If "auto", it will be automatically determined.
     - gamma_min (float): The minimum value of gamma to consider.
     - ga (np.ndarry): The data of the node for which the ancestors are being pruned.
-    - printer (callable): A function to print the results.
-    - interpolatory (bool): Whether the kernel is interpolatory.
+    - key (jax.random.PRNGKey): The random key to use for the Z-test.
 
     Returns:
     - yb (np.ndarray): The solution of the regression.
@@ -67,6 +78,7 @@ def Z_test(gamma, cho_factor, key):
     Args:
     - gamma (float): The gamma value.
     - cho_factor (tuple): The cho_factor tuple.
+    - key (jax.random.PRNGKey): The random key to use for
 
     Returns:
     - tuple: A tuple containing the 5th percentile and 95th percentile of the B_samples.
@@ -87,11 +99,7 @@ def find_gamma(K, Y):
 
     Args:
     - K (numpy.ndarray): The kernel matrix.
-    - interpolatory (bool): Whether the kernel is interpolatory or not.
     - Y (numpy.ndarray): The target vector, also called ga.
-    - gamma_min (float): The minimum value of gamma.
-    - printer (function): The function to print messages.
-    - tol (float): The tolerance value for the optimisation algorithm.
 
     Returns:
     - float: The gamma value.

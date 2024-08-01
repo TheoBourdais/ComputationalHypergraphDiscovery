@@ -3,32 +3,19 @@ import jax.numpy as jnp
 
 class ModeContainer:
     """
-    A container for mode matrices and their metadata. Allows manipulation of the modes, i.e. removing nodes, handling clusters, etc.
+    A class representing a container for modes.
 
-    All modifications of the container are done by creating a new container with the desired modifications. This is done to avoid side effects.
-    The matrices are never modified. Instead, the container keeps track of which matrices are used and which are not. Thus, one must view
-    the active modes as the modes of the container, while the inactive modes can be viewed as a cache of the deleted modes.
+    Attributes:
+    - names (list): A list of variable names.
+    - name_to_index (dict): A dictionary mapping variable names to their indices.
+    - clusters (list): A list of clusters of variable names.
+    - index_matrix (numpy.ndarray): A mode matrix.
 
-    Parameters
-    ----------
-    matrices : list of numpy.ndarray
-        List of mode matrices.
-    matrices_types : list of str
-        List of mode types.
-    matrices_names : list of str
-        List of mode names.
-    interpolatory_list : list of bool
-        List of boolean values indicating whether each mode is interpolatory.
-    variable_names : list of str
-        List of variable names.
-    beta : numpy.ndarray
-        Array of beta scale factors.
-    clusters : list of list of str, optional
-        List of clusters of variable names. Defaults to None.
-    level : numpy.ndarray, optional
-        Array of levels for each mode. Defaults to None.
-    used : dict of str:bool, optional
-        Dictionary of variable names and their usage status. Defaults to None.
+    Methods:
+    - __init__(self, variable_names, clusters=None): Initializes the ModeContainer object.
+    - assign_clusters(self, clusters): Assigns clusters to the container.
+    - make_index_matrix(names, clusters, name_to_index): Creates an index matrix from the given names and clusters.
+    - __repr__(self): Returns a string representation of the object.
     """
 
     def __init__(
@@ -38,6 +25,13 @@ class ModeContainer:
     ) -> None:
         """
         Initialize the ModeContainer object.
+
+        Args:
+        - variable_names (list): A list of variable names.
+        - clusters (list, optional): A partition of the variable names. Defaults to None.
+
+        Returns:
+        - None
         """
         assert len(list(variable_names)) == len(set(list(variable_names)))
         self.names = variable_names
@@ -59,7 +53,7 @@ class ModeContainer:
         - None
 
         Raises:
-        - AssertionError: If the clusters are not a partition of matrices_names.
+        - AssertionError: If the clusters are not a partition of names.
         """
         if clusters is None:
             self.clusters = [[name] for name in self.names]
@@ -78,6 +72,7 @@ class ModeContainer:
         Args:
         - names (list): A list of variable names.
         - clusters (list): A list of clusters of variable names.
+        - name_to_index (dict): A dictionary mapping variable names to their indices.
 
         Returns:
         - numpy.ndarray: A mode matrix.
