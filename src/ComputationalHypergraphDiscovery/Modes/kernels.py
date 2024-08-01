@@ -48,23 +48,6 @@ class ModeKernel:
         rest_k = self(X, Y, rest)
         return whole_k - rest_k
 
-    def activation(self, X, which_dim, which_dim_only, yb):
-        """
-        Compute the activation of the kernel for a given data point.
-        This is done by computing the kernel matrix with the data matrix, and then taking the dot product with the target vector.
-
-        Args:
-        - X (np.array): The data matrix.
-        - which_dim (np.array): The dimension of the data matrix.
-        - which_dim_only (int): The index of the data point to compute the activation for.
-        - yb (np.array): The target vector.
-
-        Returns:
-        - np.array: The activation of the kernel for the data point.
-        """
-        mat = self.individual_influence(X, X, which_dim, which_dim_only)
-        return jnp.dot(yb, mat @ yb)
-
     def __call__(self, X, Y, which_dim):
         return self.kernel(X, Y, which_dim)
 
