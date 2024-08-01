@@ -36,7 +36,7 @@ Graph discovery takes very little time. The following code runs the method on th
 ```python
 import ComputationalHypergraphDiscovery as CHD
 import pandas as pd
-df=pd.read_csv('https://raw.githubusercontent.com/TheoBourdais/ComputationalHypergraphDiscovery/main/examples/SachsData.csv')
+df=pd.read_csv('https://github.com/TheoBourdais/ComputationalHypergraphDiscovery/blob/8c3fed6dfe58a01cb73e469579ff7703b0681f7e/examples/Sachs/SachsData.csv?raw=true')
 df=df.sample(n=500,random_state=1) #subsample to run example quickly
 kernels=[CHD.Modes.LinearMode(),CHD.Modes.QuadraticMode()]
 graph_discovery = CHD.GraphDiscovery.from_dataframe(df,kernels=kernels)
