@@ -7,7 +7,7 @@
 
 This is the source code for the paper ["Computational Hypergraph Discovery: A Gaussian process framework for connecting the dots"](https://arxiv.org/abs/2311.17007). 
 
-Please see the [companion blog post](https://theobourdais.github.io/posts/2023/11/CHD/) for a gentle introduction to the method and the code. See the repo [here](https://github.com/TheoBourdais/ComputationalHypergraphDiscovery) for full documentation and examples.
+Please see the [companion blog post](https://theobourdais.github.io/posts/2023/11/CHD/) for a gentle introduction to the method and the code. See the repo [here](https://www.pnas.org/doi/10.1073/pnas.2403449121) for full documentation and examples.
 
 
 ## Installation 
