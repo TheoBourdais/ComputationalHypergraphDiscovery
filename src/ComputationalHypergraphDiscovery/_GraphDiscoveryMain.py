@@ -18,16 +18,19 @@ from .helper_functions import make_find_ancestor_function, make_preprocessing_fu
 
 
 class GraphDiscovery:
-    """GraphDiscovery is the main class of CHD. It is used to discover the hypergraph structure of a dataset. It contains a Networkx object G that
+    """
+    GraphDiscovery is the main class of CHD. It is used to discover the hypergraph structure of a dataset. It contains a Networkx object G that
     stores the results of graph discovery. It also contains a ModeContainer object that stores the kernel matrices of the modes of the dataset.
+
     To instantiate a graph discovery, you need:
-        - X: the dataset, as a numpy array of shape (n_features, n_samples) of real numbers.
+        - X: the dataset, as a numpy array of shape (n_samples, n_features) of real numbers.
         - names: the names of the features, as a list of strings
-        - mode_kernels: the kernels used to compute the modes of the dataset (must be a mode kernel object). If None, the default kernels are used (linear, quadratic and gaussian)
-        - mode_container: Alternatively, if the kernel matrices are already computed (for instance when reusing computations from a previous graph), you can provide a ModeContainer object,
-        which contains the kernel matrices of the modes of the dataset. You cannot provide both mode_kernels and mode_container.
+        - kernels: the kernels used to compute the modes of the dataset (must be a list of ModeKernel objects). If None, the default kernels are used (linear, quadratic and gaussian)
+        - normalize: Whether to normalize the data before graph discovery (normalization means centering and scaling to unit variance).
         - clusters: if you want to use clusters of node, you can provide a list of lists of strings, where each sublist is a cluster of nodes. If None, no clustering is used.
         - possible_edges: if you want to restrict the possible edges of the graph, you can provide a networkx.DiGraph object, where each edge is a possible edge of the graph.
+        - verbose: whether to print information during graph discovery
+        - gamma_min: the minimum value of gamma used in the graph discovery process
 
     Available class methods:
         - from_dataframe: alternative constructor, that takes a pandas dataframe as input. You can also provide normalize=True to normalize the data before graph discovery, as well as any keyword argument of the constructor.
@@ -54,19 +57,17 @@ class GraphDiscovery:
         gamma_min=1e-9,
     ) -> None:
         """
-        Builds GraphDiscovery object. In particular, if mode_container is None, it computes the kernel matrices of the modes of the dataset, which
-        can be computationally expensive. If you want to reuse computations from a previous graph, you can provide a ModeContainer object instead.
+        Builds GraphDiscovery object.
 
         Args:
-        - X (np.ndarray):the dataset, as an array of shape (n_features, n_samples). Data is treated as real numbers.
-        - names (list of strings): the names of the features,
-        - mode_kernels (ModeKernelList or ModeKernel, default None): the kernels used to compute the modes of the dataset. If None, the default kernels are used (linear, quadratic and gaussian)
-        - mode_container (ModeContainer object, default None): alternatively, if the kernel matrices are already computed (for instance when reusing computations from a previous graph), you can provide a ModeContainer object,
-            which contains the kernel matrices of the modes of the dataset. You cannot provide both mode_kernels and mode_container.
+        - X (np.ndarray): the dataset, as an array of shape (n_samples, n_features). Data is treated as real numbers.
+        - names (list of strings): the names of the features.
+        - kernels (list of ModeKernel, default None): the kernels used to compute the modes of the dataset. If None, the default kernels are used (linear, quadratic, and Gaussian).
         - normalize (boolean, default True): Whether to normalize the data before graph discovery (normalization means centering and scaling to unit variance).
-        - clusters (list of lists of strings, default None): if you want to use clusters of node, you can provide a list of lists of strings, where each sublist is a cluster of nodes. If None, no clustering is used.
+        - clusters (list of lists of strings, default None): if you want to use clusters of nodes, you can provide a list of lists of strings, where each sublist is a cluster of nodes. If None, no clustering is used.
         - possible_edges (nx.DiGraph object, default None): if you want to restrict the possible edges of the graph, you can provide the possible_edges, where each edge is a possible edge of the graph.
-        - verbose (boolean, default True): whether to print information during graph discovery
+        - verbose (boolean, default True): whether to print information during graph discovery.
+        - gamma_min (float, default 1e-9): the minimum value for the regularization parameter gamma.
 
         Returns:
         - GraphDiscovery object
@@ -186,6 +187,15 @@ class GraphDiscovery:
         return new_graph
 
     def prepare_functions(self, is_interpolatory=None):
+        """
+        Prepares various functions used in the graph discovery process.
+
+        Args:
+            is_interpolatory (bool, optional): Flag indicating whether to force a the interpolatory behavior. Useful when a high number of features make non-interpolatory kernels (like quadratic) actually behave like an interpolatory kernel. Defaults to None.
+
+        Returns:
+            None
+        """
         scales = {k.name: k.scale for k in self.kernels}
         for kernel in self.kernels:
             kernel.setup(self.X, scales=scales)
@@ -238,17 +248,10 @@ class GraphDiscovery:
         Args:
         - targets(list of strings, default None): nodes for which we discover the ancestors.
             Each string is the name of a node of the graph. If None, the ancestors of all nodes are discovered.
-        - gamma(float or "auto", default "auto"): the gamma parameter used for the regression.
-            If "auto", the gamma parameter is automatically determined.
-            If a float, the gamma parameter is fixed to this value.
-            It is advised to use "auto" for most applications, as a good choice of gamma is crucial for the performance of the algorithm, and unintuitive to find.
-        - gamma_min (float, default 1e-9): the minimum value of gamma allowed. If gamma is "auto", the gamma parameter is automatically determined, but must be greater than gamma_min.
-            A gamma_min that is too small may lead to numerical instability.
         - kernel_chooser (KernelChooser, default None): a KernelChooser object that chooses the kernel to use for each node. If None, a MinNoiseKernelChooser is used.
         - mode_chooser (ModeChooser, default None): a ModeChooser object that chooses the mode to use for each node. If None, a MaxIncrementModeChooser is used.
-        - early_stopping (EarlyStopping object, default None): an object of a class that implements the EarlyStopping interface. If None, a NoEarlyStopping is used.
 
-        See ComputationalHyperGraph.decision module for details on KernelChooser, ModeChooser and EarlyStopping objects.
+        See ComputationalHyperGraph.decision module for details on KernelChooser and ModeChooser objects.
 
         Returns:
         - None
@@ -387,7 +390,7 @@ class GraphDiscovery:
         deleting all nodes that are not possible ancestors of the given node. Note that this deletes also the nodes that are in the same cluster as the given node.
 
         Args:
-        - name (str): the name of the node to be deleted from the modes
+        - names (str): the name of the node to be deleted from the modes
 
         Returns:
         - ga (numpy.ndarray): the adjacency matrix of the node with the given name
@@ -409,6 +412,25 @@ class GraphDiscovery:
     def get_kernel_performance(
         self, active_modess, gas, subkeys, use_interpolatory=None
     ):
+        """
+        Calculates the performance of each kernel in terms of signal-to-noise ratio.
+
+        Args:
+            active_modess (jax.numpy.ndarray): Array of active modes.
+            gas (jax.numpy.ndarray): array of target vectors
+            subkeys (list): List of subkeys.
+            use_interpolatory (bool, optional): Flag indicating whether to use interpolatory regression.
+                Defaults to None.
+
+        Returns:
+            tuple: A tuple containing the performance metrics for each kernel. The tuple contains 6 arrays:
+                - Array 1: The coefficients of the kernel regression.
+                - Array 2: The signal-to-noise ratios.
+                - Array 3: Z_low for Z-test
+                - Array 4: Z_high for Z-test
+                - Array 5: gamma found
+                - Array 6: key (used for random number generation by JAX)
+        """
         kernel_performance = []
 
         for kernel in self.kernels:
@@ -453,6 +475,23 @@ class GraphDiscovery:
         return kernel_performance
 
     def choose_kernel(kernel_performances, kernel_chooser):
+        """
+        Choose the best kernel based on the given kernel performances.
+
+        Args:
+            kernel_performances (list): A list of kernel performances for each kernel.
+            kernel_chooser (function): A function that chooses the best kernel based on the performances.
+
+        Returns:
+            tuple: A tuple containing the following arrays:
+                - ybs (numpy.ndarray): Array of yb values.
+                - gammas (numpy.ndarray): Array of gamma values.
+                - subkeys (numpy.ndarray): Array of subkey values.
+                - noisess (numpy.ndarray): Array of noise values.
+                - Z_lows (numpy.ndarray): Array of Z_low values.
+                - Z_highs (numpy.ndarray): Array of Z_high values.
+                - chosen_kernels (numpy.ndarray): Array of chosen kernel values.
+        """
         ybs = []
         gammas = []
         subkeys = []
@@ -497,7 +536,34 @@ class GraphDiscovery:
         loop_number,
         message,
     ):
+        """
+        Prunes ancestors based on the given parameters.
 
+        Args:
+            kernel: The kernel used for ancestor finding.
+            ancestor_finding_step_funcs: function used for ancestor finding.
+            X: The input data.
+            active_modess_kernel: The active modes.
+            gas_kernel: The target vectors
+            ybs_kernel: The regression coefficients
+            gammas_kernel: The gammas
+            subkeys_kernel: The subkeys
+            noise_kernel: The noise to signal ratios ratios
+            Z_low_kernel: The Z_lows
+            Z_high_kernel: The Z_highs
+            loop_number: The number of iterations for ancestor finding.
+            message: Additional message to display during ancestor finding.
+
+        Returns:
+            A tuple containing the following arrays, each aggregating all the values encountered during the ancestor finding process:
+            - ancestor_modess: An array of ancestor modes.
+            - noisess_kernel: An array of noise to signal ratios.
+            - Z_lows_kernel: An array of Z lows
+            - Z_highs_kernel: An array of Z highs
+            - activationss_kernel: An array of activations
+            - gammas: An array of gammas.
+            - ybs: An array of regression coefficients.
+        """
         ancestor_modess = [np.sum(active_modess_kernel, axis=1)]
         noisess_kernel = [noise_kernel]
         Z_lows_kernel = [Z_low_kernel]
@@ -583,29 +649,25 @@ class GraphDiscovery:
         ybs_kernel,
     ):
         """
-        Finds ancestors of a given node in the graph. This method is called by the fit method.
-        This corresponds algorthm 1 in the paper.
-        Has two main components:
-            - finding the kernel to use for each node using _compute_kernel_preformances and the kernel_chooser
-            - pruning the ancestors of the node using the chosen kernel using _iterative_ancestor_pruner
-
-        Finally, the mode_chooser is used to choose the ancestors of the nodes. Data is stored in the graph an the noise evolutionis plotted.
+        Process the results of the hypergraph discovery algorithm.
 
         Args:
-        - name (str): The name of the node to find ancestors for.
-        - gamma (float or str): The gamma value to use for kernel computation. If set to "auto", the gamma value will be
-            automatically determined based on the interpolatory property of the active modes.
-        - gamma_min (float): The minimum gamma value to use for kernel computation.
-        - kernel_chooser (callable): A function that takes in a dictionary of kernel performances and returns the key of
-            the chosen kernel.
-        - mode_chooser (callable): A function that takes in a list of modes, a list of noises, and a list of Zs, and
-            returns the chosen mode.
-        - early_stopping (bool): Whether to use early stopping during ancestor pruning.
+            targets (list): List of target names.
+            chosen_kernel (int): Index of the chosen kernel.
+            mask_kernel (list): List of boolean values indicating whether each target has a mask.
+            chosen_modes (list): List of chosen modes for each target.
+            ancestor_modess (list): List of ancestor modes for each target.
+            noisess (list): List of noise values for each target and mode.
+            Z_lows (list): List of lower bounds of Z values for each target and mode.
+            Z_highs (list): List of upper bounds of Z values for each target and mode.
+            activationss (list): List of activation values for each target and mode.
+            kernel_performances (list): List of kernel performances for each target and mode.
+            gammas (ndarray): Array of gamma values for each target and mode.
+            ybs_kernel (ndarray): Array of yb values for each target and mode.
 
         Returns:
-        - None
+            None
         """
-
         index = 0
         for (
             name,
