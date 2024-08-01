@@ -113,7 +113,9 @@ class GraphDiscovery:
             assert len(kernels) == len(
                 set([str(k) for k in kernels])
             ), "Kernels must have different names"
+
         self._kernels = kernels
+
         self.gamma_min = gamma_min
         self.prepare_functions(is_interpolatory=None)
 
@@ -182,8 +184,10 @@ class GraphDiscovery:
         return new_graph
 
     def prepare_functions(self, is_interpolatory=None):
+        scales = {k.name: k.scale for k in self.kernels}
         for kernel in self.kernels:
-            kernel.setup(self.X)
+            kernel.setup(self.X, scales=scales)
+
         self.interpolary_regression_find_gamma = jax.jit(
             jax.vmap(
                 interpolatory.perform_regression_and_find_gamma,
@@ -205,6 +209,7 @@ class GraphDiscovery:
             kernel: jax.jit(
                 make_find_ancestor_function(
                     kernel,
+                    scales,
                     memory_efficient=kernel.memory_efficient_required,
                     is_interpolatory=is_interpolatory,
                 )
@@ -408,7 +413,9 @@ class GraphDiscovery:
                 self.X, self.X, np.sum(active_modess, axis=1)
             )
             min_eigenvalue = np.min(np.linalg.eigvalsh(K_mat), axis=1)
-            gamma_mins = np.where(min_eigenvalue + 1e-9 < 0, -2 * min_eigenvalue, 1e-9)
+            gamma_mins = np.where(
+                min_eigenvalue + self.gamma_min < 0, -2 * min_eigenvalue, self.gamma_min
+            )
             interpolatory_bool = (
                 kernel.is_interpolatory
                 if use_interpolatory is None
@@ -422,6 +429,12 @@ class GraphDiscovery:
                 res = self.non_interpolatory_regression_find_gamma(
                     K_mat, gas, gamma_mins, subkeys
                 )
+            if np.isnan(res[4]).any():
+                print(
+                    "Somme gammas were found to be NaNs. This error may not be corrected, so corresponding signal-to-noise ratio are set to 1"
+                )
+                new_res_1 = np.where(np.isnan(res[4]), 1, res[1])
+                res = (res[0], new_res_1, *res[2:])
             if np.isnan(res[1]).any():
                 error_message = "The regression has returned NaNs, this is likely due to the kernel matrix not being positive definite\n"
                 error_message += "See the spectrum below for confirmation. Consider increasing gamma_min\n"

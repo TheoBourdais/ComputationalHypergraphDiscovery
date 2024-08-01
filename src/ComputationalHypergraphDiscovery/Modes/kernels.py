@@ -16,6 +16,7 @@ class ModeKernel:
     """
 
     def __init__(self) -> None:
+        self._scale = 1.0
         pass
 
     @property
@@ -33,6 +34,10 @@ class ModeKernel:
     @property
     def memory_efficient_required(self):
         return self._memory_efficient_required
+
+    @property
+    def scale(self):
+        return self._scale
 
     def __repr__(self) -> str:
         return self.name
@@ -63,6 +68,18 @@ class ModeKernel:
     def __call__(self, X, Y, which_dim):
         return self.kernel(X, Y, which_dim)
 
+    def __mul__(self, other):
+        if isinstance(other, float):
+            assert other > 0
+            self._scale = other
+            return self
+
+    def __rmul__(self, other):
+        """
+        Right multiplication of a kernel by a scalar. Same as left multiplication.
+        """
+        return self.__mul__(other)
+
 
 class LinearMode(ModeKernel):
     """
@@ -73,16 +90,20 @@ class LinearMode(ModeKernel):
     - name (str, optional): Name of the kernel. Defaults to None.
     """
 
-    def __init__(self, memory_efficient_required=False, name=None) -> None:
+    def __init__(self, memory_efficient_required=False) -> None:
+        super().__init__()
         self.hyperparameters = {}
         self._is_interpolatory = False
         self._memory_efficient_required = memory_efficient_required
-        self.name = name if name is not None else "linear"
+        self.name = "linear"
+        self._scale = 2.0
 
-    def setup(self, X):
+    def setup(self, X, scales):
+        assert self.scale == scales[self.name]
+
         def vectorized_kernel(X, Y, which_dim):
             # factor of 2 is added for consistency with the quadratic kernel
-            return 1 + 2 * jnp.dot(X * which_dim[None, :], Y.T)
+            return 1 + self.scale * jnp.dot(X * which_dim[None, :], Y.T)
 
         self.kernel = vectorized_kernel
         self.kernel_only_var = (
@@ -116,20 +137,35 @@ class QuadraticMode(ModeKernel):
     - name (str, optional): Name of the kernel. Defaults to None.
     """
 
-    def __init__(self, memory_efficient_required=False, name=None) -> None:
+    def __init__(self, memory_efficient_required=False) -> None:
+        super().__init__()
         self._is_interpolatory = False
-        self.name = name if name is not None else "quadratic"
+        self.name = "quadratic"
         self._memory_efficient_required = memory_efficient_required
 
-    def setup(self, X):
+    def setup(self, X, scales):
+        assert self.scale == scales[self.name]
+        try:
+            scales["linear"]
+        except KeyError:
+            scales["linear"] = 2.0
+        alpha = 0.5 * scales["linear"] / self.scale
+
         def vectorized_kernel(X, Y, which_dim):
-            return (1 + jnp.dot(X * which_dim[None, :], Y.T)) ** 2
+            return self.scale * (alpha + jnp.dot(X * which_dim[None, :], Y.T)) ** 2 + (
+                1 - alpha**2 * self.scale
+            )
 
         def vectorized_kernel_only_var(X, Y, which_dim, which_dim_only):
             linear_only = jnp.dot(X * which_dim_only[None, :], Y.T)
             rest = which_dim * (1 - which_dim_only)
             linear_rest = jnp.dot(X * rest[None, :], Y.T)
-            return (1 + linear_only) ** 2 + 2 * linear_only * linear_rest - 1
+
+            return (
+                self.scale * (alpha + linear_only) ** 2
+                + 2 * self.scale * linear_only * linear_rest
+                - self.scale * alpha**2
+            )
 
         self.kernel = vectorized_kernel
         self.kernel_only_var = vectorized_kernel_only_var
@@ -164,16 +200,19 @@ class GaussianMode(ModeKernel):
 
     """
 
-    def __init__(self, l, memory_efficient_required=True, name=None) -> None:
+    def __init__(self, l, memory_efficient_required=True) -> None:
+        super().__init__()
         self._l = l
         self._is_interpolatory = True
         self._memory_efficient_required = memory_efficient_required
-        self.name = name if name is not None else "gaussian"
+        self.name = "gaussian"
 
         self.quadratic_part = QuadraticMode()
 
-    def setup(self, X):
-        self.quadratic_part.setup(X)
+    def setup(self, X, scales):
+        assert self.scale == scales[self.name]
+        self.quadratic_part._scale = scales["quadratic"]
+        self.quadratic_part.setup(X, scales)
 
         def gaussian_exp(x, y):
             return jnp.exp(-((x - y) ** 2) / (2 * self.l**2))
@@ -184,7 +223,7 @@ class GaussianMode(ModeKernel):
 
         def k(X, Y, which_dim):
             return (
-                jnp.prod(1 + which_dim[None, None, :] * self.exps, axis=2)
+                self.scale * jnp.prod(1 + which_dim[None, None, :] * self.exps, axis=2)
                 + self.quadratic_part(X, Y, which_dim)
                 - 1
             )
@@ -201,7 +240,7 @@ class GaussianMode(ModeKernel):
                 self.quadratic_part.individual_influence(
                     X, Y, which_dim, which_dim_only
                 )
-                + only_part * rest_part
+                + self.scale * only_part * rest_part
             )
 
         self.kernel_only_var = k_only_var

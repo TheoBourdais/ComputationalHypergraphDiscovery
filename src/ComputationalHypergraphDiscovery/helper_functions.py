@@ -27,7 +27,7 @@ def make_preprocessing_functions():
     return remove_non_ancestors, remove_non_ancestors_no_adj
 
 
-def make_activation_function(kernel, memory_efficient):
+def make_activation_function(kernel, scales, memory_efficient):
     if isinstance(kernel, kClass.LinearMode):
 
         def get_vecs(X, which_dim_only, yb):
@@ -41,16 +41,17 @@ def make_activation_function(kernel, memory_efficient):
         def get_activations(X, yb, ga, active_modes):
             energy = -np.dot(ga, yb)
             vecs, _ = get_vecs_vmap(X, active_modes, yb)
-            activations = np.sum(vecs, axis=1) ** 2 / energy
-            activations = np.clip(activations, 0, None) / np.maximum(
+            activations = kernel.scale * np.sum(vecs, axis=1) ** 2 / energy
+            """activations = np.clip(activations, 0, None) / np.maximum(
                 np.max(activations), 1
-            )
+            )"""
             activations = np.where(np.all(active_modes == 0, axis=1), 2.0, activations)
             return activations
 
         return get_activations
 
     if isinstance(kernel, kClass.QuadraticMode):
+        alpha = 0.5 * scales["linear"] / kernel.scale
 
         def get_vecs(X, which_dim_only, yb):
             X_col = X[:, np.argmax(which_dim_only)]
@@ -63,15 +64,19 @@ def make_activation_function(kernel, memory_efficient):
         def get_activations(X, yb, ga, active_modes):
             energy = -np.dot(ga, yb)
             which_dim = np.sum(active_modes, axis=0)
-            K_mat_all = 2 * (1 + np.dot(X * which_dim[None, :], X.T))
+            K_mat_all = 2 * (alpha + np.dot(X * which_dim[None, :], X.T))
             vecs, vecsquared = get_vecs_vmap(X, active_modes, yb)
             activations = (
-                np.einsum("ij,ni,nj->n", K_mat_all, vecs, vecs)
-                - np.sum(vecsquared, axis=1) ** 2
-            ) / energy
-            activations = np.clip(activations, 0, None) / np.maximum(
-                np.max(activations), 1
+                kernel.scale
+                * (
+                    np.einsum("ij,ni,nj->n", K_mat_all, vecs, vecs)
+                    - np.sum(vecsquared, axis=1) ** 2
+                )
+                / energy
             )
+            """activations = np.clip(activations, 0, None) / np.maximum(
+                np.max(activations), 1
+            )"""
             activations = np.where(np.all(active_modes == 0, axis=1), 2.0, activations)
             return activations
 
@@ -94,16 +99,18 @@ def make_activation_function(kernel, memory_efficient):
         energy = -np.dot(ga, yb)
         which_dim = np.sum(active_modes, axis=0)
         activations = activation_vmap(X, which_dim, active_modes, yb) / energy
-        activations = np.clip(activations, 0, None) / np.maximum(np.max(activations), 1)
+        """activations = np.clip(activations, 0, None) / np.maximum(np.max(activations), 1)"""
         activations = np.where(np.all(active_modes == 0, axis=1), 2.0, activations)
         return activations
 
     return get_activations
 
 
-def make_find_ancestor_function(kernel, is_interpolatory=None, memory_efficient=False):
+def make_find_ancestor_function(
+    kernel, scales, is_interpolatory=None, memory_efficient=False
+):
 
-    get_activations_func = make_activation_function(kernel, memory_efficient)
+    get_activations_func = make_activation_function(kernel, scales, memory_efficient)
     interpolatory_bool = (
         kernel.is_interpolatory if is_interpolatory is None else is_interpolatory
     )
