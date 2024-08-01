@@ -27,8 +27,8 @@ def make_preprocessing_functions():
     return remove_non_ancestors, remove_non_ancestors_no_adj
 
 
-def make_activation_function(kernel, scales, memory_efficient):
-    if isinstance(kernel, kClass.LinearMode):
+def make_activation_function(kernel, scales, has_clusters, memory_efficient):
+    if isinstance(kernel, kClass.LinearMode) and not has_clusters:
 
         def get_vecs(X, which_dim_only, yb):
             X_col = X[:, np.argmax(which_dim_only)]
@@ -50,7 +50,7 @@ def make_activation_function(kernel, scales, memory_efficient):
 
         return get_activations
 
-    if isinstance(kernel, kClass.QuadraticMode):
+    if isinstance(kernel, kClass.QuadraticMode) and not has_clusters:
         alpha = 0.5 * scales["linear"] / kernel.scale
 
         def get_vecs(X, which_dim_only, yb):
@@ -107,10 +107,12 @@ def make_activation_function(kernel, scales, memory_efficient):
 
 
 def make_find_ancestor_function(
-    kernel, scales, is_interpolatory=None, memory_efficient=False
+    kernel, scales, has_clusters, is_interpolatory=None, memory_efficient=False
 ):
 
-    get_activations_func = make_activation_function(kernel, scales, memory_efficient)
+    get_activations_func = make_activation_function(
+        kernel, scales, has_clusters, memory_efficient
+    )
     interpolatory_bool = (
         kernel.is_interpolatory if is_interpolatory is None else is_interpolatory
     )

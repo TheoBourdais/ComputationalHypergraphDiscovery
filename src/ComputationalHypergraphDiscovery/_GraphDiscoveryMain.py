@@ -106,6 +106,7 @@ class GraphDiscovery:
         self.G = nx.DiGraph()
         self.G.add_nodes_from(names)
 
+        self.has_clusters = clusters is not None
         self.modes = ModeContainer(self.names, clusters)
         if kernels is None:
             kernels = [LinearMode(), QuadraticMode(), GaussianMode(l=1)]
@@ -181,6 +182,7 @@ class GraphDiscovery:
             for other_node in other_nodes:
                 edges_to_remove.append((node, other_node))
         new_graph.G.remove_edges_from(edges_to_remove)
+        new_graph.has_clusters = True
         return new_graph
 
     def prepare_functions(self, is_interpolatory=None):
@@ -210,6 +212,7 @@ class GraphDiscovery:
                 make_find_ancestor_function(
                     kernel,
                     scales,
+                    has_clusters=self.has_clusters,
                     memory_efficient=kernel.memory_efficient_required,
                     is_interpolatory=is_interpolatory,
                 )
