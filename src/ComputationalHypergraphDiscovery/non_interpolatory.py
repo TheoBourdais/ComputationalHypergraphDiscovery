@@ -96,7 +96,10 @@ def find_gamma(K, Y):
     Returns:
     - float: The gamma value.
     """
-    residuals = np.linalg.lstsq(K, Y, rcond=None)[1]
+    K_reg = (
+        K + np.eye(K.shape[0]) * np.finfo("float64").eps
+    )  # in rare edge cases, SVD fails without this
+    residuals = np.linalg.lstsq(K_reg, Y, rcond=None)[1]
     gamma = np.sum(residuals)
 
     return gamma
