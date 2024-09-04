@@ -623,6 +623,37 @@ class GraphDiscovery:
             if np.all(active_modess_kernel == 0):
                 break
         pbar.close()
+        if (
+            loop_number == 0
+        ):  # the activation is computed during the pruning step, so if there is no pruning step, we need to compute the activations here
+            K_mat = self.vmaped_kernel[kernel](
+                self.X, self.X, np.sum(active_modess_kernel, axis=1)
+            )
+
+            min_eigenvalue = np.linalg.eigvalsh(K_mat)[:, 0]
+            gamma_min_kernel = np.where(
+                min_eigenvalue + 1e-9 < 0, -2 * min_eigenvalue, 1e-9
+            )
+            (
+                active_modess_kernel,
+                ybs_kernel,
+                gammas_kernel,
+                subkeys_kernel,
+                activations,
+                noise,
+                Z_low,
+                Z_high,
+            ) = ancestor_finding_step(
+                X,
+                active_modess_kernel,
+                gas_kernel,
+                gammas_kernel,
+                ybs_kernel,
+                subkeys_kernel,
+                gamma_min_kernel,
+            )
+            activationss_kernel.append(activations)
+
         return (
             np.stack(ancestor_modess, axis=1),
             np.stack(noisess_kernel, axis=1),
