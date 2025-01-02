@@ -44,6 +44,7 @@ def perform_regression_and_find_gamma(K, ga, gamma_min, key):
     - key (jax.random.PRNGKey): The random key after the Z-test.
 
     """
+    key, subkey = random.split(key)
     eigenvalues, eigenvectors = np.linalg.eigh(K)
     gamma = find_gamma(
         eigenvalues=eigenvalues, gamma_min=gamma_min, Pga=np.dot(eigenvectors.T, ga)
@@ -53,8 +54,8 @@ def perform_regression_and_find_gamma(K, ga, gamma_min, key):
     yb, noise = solve_variationnal(
         ga, gamma=gamma_used, eigenvalues=eigenvalues, eigenvectors=eigenvectors
     )
-    Z_low, Z_high = Z_test(gamma_used, eigenvalues, eigenvectors, key)
-    return yb, noise, Z_low, Z_high, gamma
+    Z_low, Z_high = Z_test(gamma_used, eigenvalues, eigenvectors, subkey)
+    return yb, noise, Z_low, Z_high, gamma, key
 
 
 def solve_variationnal(ga, gamma, eigenvalues, eigenvectors):
@@ -95,8 +96,7 @@ def Z_test(gamma, eigenvalues, eigenvectors, key):
     - tuple: A tuple containing the 5th percentile and 95th percentile of the B_samples.
     """
     N = 100
-    key, subkey = random.split(key)
-    samples = random.normal(subkey, shape=(eigenvectors.shape[0], N))
+    samples = random.normal(key, shape=(eigenvectors.shape[0], N))
     Pgas = np.dot(eigenvectors.T, samples)
     coeffs = gamma / (eigenvalues + gamma)
     Pgas_coeffs = Pgas * coeffs[:, None]
@@ -104,7 +104,7 @@ def Z_test(gamma, eigenvalues, eigenvectors, key):
         Pgas_coeffs, Pgas, axis=0
     )
     B_samples = np.sort(noises)
-    return B_samples[int(0.05 * N)], B_samples[int(0.95 * N)], key
+    return B_samples[int(0.05 * N)], B_samples[int(0.95 * N)]
 
 
 def find_gamma(eigenvalues, Pga, gamma_min):
