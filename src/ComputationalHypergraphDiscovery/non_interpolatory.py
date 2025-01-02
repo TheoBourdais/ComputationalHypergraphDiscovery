@@ -1,27 +1,27 @@
 import jax.numpy as np
-import jax.scipy.linalg as jax_linalg
-from jax import random
 import jax
-
-
-def perform_regression_and_find_gamma(K, ga, gamma_min, key):
-    """
-    Performs regression and finds the optimal gamma value.
-
-    Args:
-        K (array-like): The input data.
-        ga (array-like): The target values.
-        gamma_min (float): The minimum value of gamma to consider.
-        key (str): The key for the regression.
-
-    Returns:
-        The result of the regression with the optimal gamma value.
-    """
-    gamma = find_gamma(K=K, Y=ga)
-    return perform_regression(K=K, ga=ga, gamma=gamma, gamma_min=gamma_min, key=key)
+from jax import random
+from jax.scipy.optimize import minimize
 
 
 def perform_regression(K, ga, gamma, gamma_min, key):
+    """
+    Perform regression using the given parameters.
+
+    Args:
+        K (int): The value of K.
+        ga (float): The value of ga.
+        gamma (float): The value of gamma.
+        gamma_min (float): The minimum value of gamma.
+        key (str): The key value.
+
+    Returns:
+        The result of performing regression and finding gamma.
+    """
+    return perform_regression_and_find_gamma(K=K, ga=ga, gamma_min=gamma_min, key=key)
+
+
+def perform_regression_and_find_gamma(K, ga, gamma_min, key):
     """
     Perform a Kernel Ridge Regression on the given data using the kernel matrix K and the target values ga.
 
@@ -32,7 +32,6 @@ def perform_regression(K, ga, gamma, gamma_min, key):
 
     Args:
     - K (np.ndarray): Kernel matrix of the chosen kernel.
-    - gamma (float or str): The regularization parameter for the regression. If "auto", it will be automatically determined.
     - gamma_min (float): The minimum value of gamma to consider.
     - ga (np.ndarry): The data of the node for which the ancestors are being pruned.
     - key (jax.random.PRNGKey): The random key to use for the Z-test.
@@ -42,72 +41,95 @@ def perform_regression(K, ga, gamma, gamma_min, key):
     - noise (float): The noise level of the regression.
     - (Z_low, Z_high) (tuple): The Z values of the regression.
     - gamma (float): The gamma value used for the regression.
+    - key (jax.random.PRNGKey): The random key after the Z-test.
 
     """
+    eigenvalues, eigenvectors = np.linalg.eigh(K)
+    gamma = find_gamma(
+        eigenvalues=eigenvalues, gamma_min=gamma_min, Pga=np.dot(eigenvectors.T, ga)
+    )
     gamma_used = jax.lax.max(gamma, gamma_min)
-    cho_factor = jax_linalg.cho_factor(K + gamma_used * np.eye(K.shape[0]))
 
-    yb, noise = solve_variationnal(ga=ga, gamma=gamma_used, cho_factor=cho_factor)
-    Z_low, Z_high, key = Z_test(gamma=gamma_used, cho_factor=cho_factor, key=key)
-    return yb, noise, Z_low, Z_high, gamma, key
+    yb, noise = solve_variationnal(
+        ga, gamma=gamma_used, eigenvalues=eigenvalues, eigenvectors=eigenvectors
+    )
+    Z_low, Z_high = Z_test(gamma_used, eigenvalues, eigenvectors, key)
+    return yb, noise, Z_low, Z_high, gamma
 
 
-def solve_variationnal(ga, gamma, cho_factor):
+def solve_variationnal(ga, gamma, eigenvalues, eigenvectors):
     """
-    Solves a yb=-K^-1@ga  problem using the Cholesky factorization of K, and gives noise
+    Solve the variational problem yb = -K^-1@ga using the eigendecomposition of K.
 
-    Args:
-    - ga(np.ndarray): A numpy array representing the input matrix.
-    - gamma(float): A float representing the gamma value.
-    - cho_factor(tuple): output of scipy.linalg.cho_factor(K)
+    Parameters:
+    ga (numpy.ndarray): The input vector ga.
+    gamma (float): The value of gamma.
+    eigenvalues (numpy.ndarray): The eigenvalues of matrix K.
+    eigenvectors (numpy.ndarray): The eigenvectors of matrix K.
 
     Returns:
-    - yb(np.ndarray): A numpy array representing the solution to the variationnal problem.
-    - noise(float): A float representing the noise value.
+    yb (numpy.ndarray): The solution vector yb.
+    noise (float): The noise term.
     """
-    yb = -jax_linalg.cho_solve(cho_factor, ga)
+    # solve yb = -K^-1@ga using the eigendecomposition of K
+    Pga = np.dot(eigenvectors.T, ga)
+    coeffs = gamma / (eigenvalues + gamma)
+    Pgacoeff = Pga * coeffs
+    noise = np.dot(Pgacoeff, Pgacoeff) / np.dot(Pgacoeff, Pga)
+    yb = -np.dot(eigenvectors, Pga / (eigenvalues + gamma))
 
-    noise = -gamma * np.dot(yb, yb) / np.dot(ga, yb)
     return yb, noise
 
 
-def Z_test(gamma, cho_factor, key):
+def Z_test(gamma, eigenvalues, eigenvectors, key):
     """
     Computes the Z-test for the given gamma and cho_factor.
 
     Args:
     - gamma (float): The gamma value.
-    - cho_factor (tuple): The cho_factor tuple.
-    - key (jax.random.PRNGKey): The random key to use for
+    - eigenvalues (np.ndarray): The eigenvalues of the kernel matrix.
+    - eigenvectors (np.ndarray): The eigenvectors of the kernel matrix.
+    - key (jax.random.PRNGKey): The random key to use for the Z-test.
 
     Returns:
     - tuple: A tuple containing the 5th percentile and 95th percentile of the B_samples.
     """
     N = 100
     key, subkey = random.split(key)
-    samples = random.normal(subkey, shape=(cho_factor[0].shape[0], N))
-    yb_samples = -jax_linalg.cho_solve(cho_factor, samples)
-    norms = np.linalg.norm(yb_samples, axis=0) ** 2
-    inner_products = np.einsum("ij,ij->j", samples, yb_samples)
-    B_samples = np.sort(-gamma * norms / inner_products)
+    samples = random.normal(subkey, shape=(eigenvectors.shape[0], N))
+    Pgas = np.dot(eigenvectors.T, samples)
+    coeffs = gamma / (eigenvalues + gamma)
+    Pgas_coeffs = Pgas * coeffs[:, None]
+    noises = np.vecdot(Pgas_coeffs, Pgas_coeffs, axis=0) / np.vecdot(
+        Pgas_coeffs, Pgas, axis=0
+    )
+    B_samples = np.sort(noises)
     return B_samples[int(0.05 * N)], B_samples[int(0.95 * N)], key
 
 
-def find_gamma(K, Y):
+def find_gamma(eigenvalues, Pga, gamma_min):
     """
-    Finds the gamma value for regression problem as the residuals of the regression problem
+    Finds the optimal value of gamma for a given set of eigenvalues.
 
-    Args:
-    - K (numpy.ndarray): The kernel matrix.
-    - Y (numpy.ndarray): The target vector, also called ga.
+    Parameters:
+    - eigenvalues (array-like): The eigenvalues for which to find the optimal gamma.
 
     Returns:
-    - float: The gamma value.
-    """
-    K_reg = (
-        K + np.eye(K.shape[0]) * np.finfo("float64").eps
-    )  # in rare edge cases, SVD fails without this
-    residuals = np.linalg.lstsq(K_reg, Y, rcond=None)[1]
-    gamma = np.sum(residuals)
+    - gamma (float): The optimal value of gamma.
 
-    return gamma
+    """
+
+    mean = np.nanmedian(np.where(eigenvalues < gamma_min, np.nan, eigenvalues))
+
+    def loss(gamma):
+        ratio = gamma[0] / (eigenvalues + gamma[0])
+        return np.sum((Pga * ratio) ** 2) / np.sum(ratio * Pga**2)
+        return np.sum((Pga * ratio) ** 2) / np.sum(ratio) ** 2
+
+    test_vals = np.logspace(-6, 6, 10000)
+    test = jax.vmap(loss)(test_vals[:, None])
+    best_test = np.argmin(test)
+    best_guess = np.where(best_test == 0, mean, test_vals[best_test])
+    res = minimize(loss, best_guess[None], method="BFGS")
+    best_guess = np.where(res.success, res.x[0], mean)
+    return best_guess

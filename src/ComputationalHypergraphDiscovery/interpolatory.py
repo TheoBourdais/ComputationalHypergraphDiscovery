@@ -45,14 +45,16 @@ def perform_regression_and_find_gamma(K, ga, gamma_min, key):
 
     """
     eigenvalues, eigenvectors = np.linalg.eigh(K)
-    gamma = find_gamma(eigenvalues=eigenvalues)
+    gamma = find_gamma(
+        eigenvalues=eigenvalues, gamma_min=gamma_min, Pga=np.dot(eigenvectors.T, ga)
+    )
     gamma_used = jax.lax.max(gamma, gamma_min)
 
     yb, noise = solve_variationnal(
         ga, gamma=gamma_used, eigenvalues=eigenvalues, eigenvectors=eigenvectors
     )
-    Z_low, Z_high, key = Z_test(gamma_used, eigenvalues, eigenvectors, key)
-    return yb, noise, Z_low, Z_high, gamma, key
+    Z_low, Z_high = Z_test(gamma_used, eigenvalues, eigenvectors, key)
+    return yb, noise, Z_low, Z_high, gamma
 
 
 def solve_variationnal(ga, gamma, eigenvalues, eigenvectors):
@@ -105,7 +107,7 @@ def Z_test(gamma, eigenvalues, eigenvectors, key):
     return B_samples[int(0.05 * N)], B_samples[int(0.95 * N)], key
 
 
-def find_gamma(eigenvalues):
+def find_gamma(eigenvalues, Pga, gamma_min):
     """
     Finds the optimal value of gamma for a given set of eigenvalues.
 
@@ -117,22 +119,17 @@ def find_gamma(eigenvalues):
 
     """
 
-    def eigenvalue_variance(gamma_log):
-        return -np.var(1 / (1 + np.clip(eigenvalues, min=0) * np.exp(-gamma_log)))
+    mean = np.nanmedian(np.where(eigenvalues < gamma_min, np.nan, eigenvalues))
 
-    res = minimize(
-        eigenvalue_variance,
-        np.log(np.median(eigenvalues, keepdims=True)),
-        method="BFGS",
-    )
-    gamma = np.exp(res.x[0])
-    gamma_med = np.median(eigenvalues)
-    gamma = jax.lax.cond(
-        (res.success & (gamma_med / 100 < gamma) & (gamma < 100 * gamma_med)),
-        lambda _: gamma,
-        lambda _: gamma_med,
-        operand=None,
-    )
-    gamma = jax.lax.max(gamma, 2 * np.min(np.clip(eigenvalues, max=0)))
+    def loss(gamma):
+        ratio = gamma[0] / (eigenvalues + gamma[0])
+        return np.sum((Pga * ratio) ** 2) / np.sum(ratio * Pga**2)
+        return np.sum((Pga * ratio) ** 2) / np.sum(ratio) ** 2
 
-    return gamma
+    test_vals = np.logspace(-6, 6, 10000)
+    test = jax.vmap(loss)(test_vals[:, None])
+    best_test = np.argmin(test)
+    best_guess = np.where(best_test == 0, mean, test_vals[best_test])
+    res = minimize(loss, best_guess[None], method="BFGS")
+    best_guess = np.where(res.success, res.x[0], mean)
+    return best_guess
