@@ -8,8 +8,7 @@ from jax import random
 import jax
 from jax.scipy.optimize import minimize
 from tqdm import tqdm
-from . import interpolatory, non_interpolatory
-
+import ComputationalHypergraphDiscovery
 
 from .Modes import ModeContainer, LinearMode, QuadraticMode, GaussianMode
 from .decision import *
@@ -202,13 +201,13 @@ class GraphDiscovery:
 
         self.interpolary_regression_find_gamma = jax.jit(
             jax.vmap(
-                interpolatory.perform_regression_and_find_gamma,
+                ComputationalHypergraphDiscovery.interpolatory.perform_interpolatory_regression_and_find_gamma,
                 in_axes=(0, 0, 0, 0),
             )
         )
         self.non_interpolatory_regression_find_gamma = jax.jit(
             jax.vmap(
-                non_interpolatory.perform_regression_and_find_gamma,
+                ComputationalHypergraphDiscovery.non_interpolatory.perform_non_interpolatory_regression_and_find_gamma,
                 in_axes=(0, 0, 0, 0),
             )
         )

@@ -1,6 +1,8 @@
 jax==0.4.28
 jaxlib==0.4.28
+joblib
 matplotlib
 networkx
 numpy
+pandas
 tqdm

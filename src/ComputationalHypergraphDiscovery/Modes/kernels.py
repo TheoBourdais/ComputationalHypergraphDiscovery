@@ -1,3 +1,4 @@
+import functools
 import jax.numpy as jnp
 import jax
 from copy import copy
@@ -95,6 +96,15 @@ class LinearMode(ModeKernel):
         self.name = "linear"
         self._scale = 2.0
 
+    @staticmethod
+    def vectorized_kernel(scale, X, Y, which_dim):
+        # factor of 2 is added for consistency with the quadratic kernel
+        return 1 + scale * jnp.dot(X * which_dim[None, :], Y.T)
+
+    @staticmethod
+    def kernel_only_var_fn(self: 'LinearMode', X, Y, which_dim, which_dim_only):
+        return self.kernel(X, Y, which_dim_only) - 1
+        
     def setup(self, X, scales):
         """
         Set up the kernel with the given data and scales.
@@ -106,15 +116,9 @@ class LinearMode(ModeKernel):
         """
         assert self.scale == scales[self.name]
 
-        def vectorized_kernel(X, Y, which_dim):
-            # factor of 2 is added for consistency with the quadratic kernel
-            return 1 + self.scale * jnp.dot(X * which_dim[None, :], Y.T)
+        self.kernel = functools.partial(LinearMode.vectorized_kernel, self.scale)
 
-        self.kernel = vectorized_kernel
-        self.kernel_only_var = (
-            lambda X, Y, which_dim, which_dim_only: self.kernel(X, Y, which_dim_only)
-            - 1
-        )
+        self.kernel_only_var = functools.partial(LinearMode.kernel_only_var_fn, self)
 
     def individual_influence(self, X, Y, which_dim, which_dim_only):
         """
@@ -162,6 +166,24 @@ class QuadraticMode(ModeKernel):
         self.name = "quadratic"
         self._memory_efficient_required = memory_efficient_required
 
+    @staticmethod
+    def vectorized_kernel(scale, alpha, X, Y, which_dim):
+        return scale * (alpha + jnp.dot(X * which_dim[None, :], Y.T)) ** 2 + (
+            1 - alpha**2 * scale
+        )
+
+    @staticmethod
+    def vectorized_kernel_only_var(scale, alpha, X, Y, which_dim, which_dim_only):
+        linear_only = jnp.dot(X * which_dim_only[None, :], Y.T)
+        rest = which_dim * (1 - which_dim_only)
+        linear_rest = jnp.dot(X * rest[None, :], Y.T)
+
+        return (
+            scale * (alpha + linear_only) ** 2
+            + 2 * scale * linear_only * linear_rest
+            - scale * alpha**2
+        )
+         
     def setup(self, X, scales):
         """
         Sets up the mode kernel with the given data and scales.
@@ -178,24 +200,9 @@ class QuadraticMode(ModeKernel):
             scales["linear"] = 2.0
         alpha = 0.5 * scales["linear"] / self.scale
 
-        def vectorized_kernel(X, Y, which_dim):
-            return self.scale * (alpha + jnp.dot(X * which_dim[None, :], Y.T)) ** 2 + (
-                1 - alpha**2 * self.scale
-            )
+        self.kernel = functools.partial(QuadraticMode.vectorized_kernel, self.scale, alpha)
 
-        def vectorized_kernel_only_var(X, Y, which_dim, which_dim_only):
-            linear_only = jnp.dot(X * which_dim_only[None, :], Y.T)
-            rest = which_dim * (1 - which_dim_only)
-            linear_rest = jnp.dot(X * rest[None, :], Y.T)
-
-            return (
-                self.scale * (alpha + linear_only) ** 2
-                + 2 * self.scale * linear_only * linear_rest
-                - self.scale * alpha**2
-            )
-
-        self.kernel = vectorized_kernel
-        self.kernel_only_var = vectorized_kernel_only_var
+        self.kernel_only_var = functools.partial(QuadraticMode.vectorized_kernel_only_var, self.scale, alpha)
 
     def individual_influence(self, X, Y, which_dim, which_dim_only):
         """
@@ -233,6 +240,32 @@ class GaussianMode(ModeKernel):
 
         self.quadratic_part = QuadraticMode()
 
+    @staticmethod
+    def gaussian_exp(self: 'GaussianMode', x, y):
+        return jnp.exp(-((x - y) ** 2) / (2 * self.l**2))
+        
+    @staticmethod
+    def k(self: 'GaussianMode', X, Y, which_dim):
+        return (
+            self.scale * jnp.prod(1 + which_dim[None, None, :] * self.exps, axis=2)
+            + self.quadratic_part(X, Y, which_dim)
+            - 1
+        )
+    
+    @staticmethod
+    def k_only_var(self: 'GaussianMode', X, Y, which_dim, which_dim_only):
+        rest = which_dim * (1 - which_dim_only)
+        only_part = (
+            jnp.prod(1 + which_dim_only[None, None, :] * self.exps, axis=2) - 1
+        )
+        rest_part = jnp.prod(1 + rest[None, None, :] * self.exps, axis=2)
+        return (
+            self.quadratic_part.individual_influence(
+                X, Y, which_dim, which_dim_only
+            )
+            + self.scale * only_part * rest_part
+        )
+        
     def setup(self, X, scales):
         """
         Setup the Gaussian mode kernel.
@@ -245,36 +278,15 @@ class GaussianMode(ModeKernel):
         self.quadratic_part._scale = scales["quadratic"]
         self.quadratic_part.setup(X, scales)
 
-        def gaussian_exp(x, y):
-            return jnp.exp(-((x - y) ** 2) / (2 * self.l**2))
+        self.gaussian_exp = functools.partial(GaussianMode.gaussian_exp, self)
 
         self.exps = jax.vmap(
-            jax.vmap(gaussian_exp, in_axes=(0, None)), in_axes=(None, 0)
+            jax.vmap(self.gaussian_exp, in_axes=(0, None)), in_axes=(None, 0)
         )(X, X)
 
-        def k(X, Y, which_dim):
-            return (
-                self.scale * jnp.prod(1 + which_dim[None, None, :] * self.exps, axis=2)
-                + self.quadratic_part(X, Y, which_dim)
-                - 1
-            )
+        self.kernel = functools.partial(GaussianMode.k, self)
 
-        self.kernel = k
-
-        def k_only_var(X, Y, which_dim, which_dim_only):
-            rest = which_dim * (1 - which_dim_only)
-            only_part = (
-                jnp.prod(1 + which_dim_only[None, None, :] * self.exps, axis=2) - 1
-            )
-            rest_part = jnp.prod(1 + rest[None, None, :] * self.exps, axis=2)
-            return (
-                self.quadratic_part.individual_influence(
-                    X, Y, which_dim, which_dim_only
-                )
-                + self.scale * only_part * rest_part
-            )
-
-        self.kernel_only_var = k_only_var
+        self.kernel_only_var = functools.partial(GaussianMode.k_only_var, self)
 
     def individual_influence(self, X, Y, which_dim, which_dim_only):
         """
