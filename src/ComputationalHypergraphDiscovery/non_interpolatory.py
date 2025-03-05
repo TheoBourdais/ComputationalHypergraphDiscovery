@@ -18,10 +18,10 @@ def perform_regression(K, ga, gamma, gamma_min, key):
     Returns:
         The result of performing regression and finding gamma.
     """
-    return perform_non_interpolatory_regression_and_find_gamma(K=K, ga=ga, gamma_min=gamma_min, key=key)
+    return perform_regression_and_find_gamma(K=K, ga=ga, gamma_min=gamma_min, key=key)
 
 
-def perform_non_interpolatory_regression_and_find_gamma(K, ga, gamma_min, key):
+def perform_regression_and_find_gamma(K, ga, gamma_min, key):
     """
     Perform a Kernel Ridge Regression on the given data using the kernel matrix K and the target values ga.
 

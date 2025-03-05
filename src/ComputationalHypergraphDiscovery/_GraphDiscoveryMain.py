@@ -120,6 +120,43 @@ class GraphDiscovery:
         self.gamma_min = gamma_min
         self.prepare_functions(is_interpolatory=None)
 
+    def __getstate__(self):
+        """
+        Custom method for pickling. Remove unpicklable JAX-jitted functions
+        before pickling.
+        """
+        # 1. Copy this instance's dict.
+        state = self.__dict__.copy()
+
+        # 2. Remove the attributes that hold jitted callables.
+        unpicklable_attrs = [
+            "interpolary_regression_find_gamma",
+            "non_interpolatory_regression_find_gamma",
+            "vmaped_kernel",
+            "ancestor_finding_step_funcs",
+            "remove_ancestors",
+            "remove_ancestors_no_adj",
+        ]
+        for attr in unpicklable_attrs:
+            if attr in state:
+                del state[attr]
+
+        return state
+
+    def __setstate__(self, state):
+        """
+        Custom method for unpickling. Recreate the jitted functions by calling
+        `prepare_functions` with the same is_interpolatory flag stored earlier.
+        """
+        # 1. Restore the instance attributes.
+        self.__dict__.update(state)
+
+        # 2. Recreate the jitted functions.
+        #    If you stored self._is_interpolatory in __init__ or earlier,
+        #    you can pass it back in here. If your code sets it some other way,
+        #    adapt accordingly.
+        self.prepare_functions(self._is_interpolatory)
+
     @property
     def kernels(self):
         return self._kernels
@@ -201,13 +238,13 @@ class GraphDiscovery:
 
         self.interpolary_regression_find_gamma = jax.jit(
             jax.vmap(
-                ComputationalHypergraphDiscovery.interpolatory.perform_interpolatory_regression_and_find_gamma,
+                ComputationalHypergraphDiscovery.interpolatory.perform_regression_and_find_gamma,
                 in_axes=(0, 0, 0, 0),
             )
         )
         self.non_interpolatory_regression_find_gamma = jax.jit(
             jax.vmap(
-                ComputationalHypergraphDiscovery.non_interpolatory.perform_non_interpolatory_regression_and_find_gamma,
+                ComputationalHypergraphDiscovery.non_interpolatory.perform_regression_and_find_gamma,
                 in_axes=(0, 0, 0, 0),
             )
         )
