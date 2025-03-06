@@ -102,8 +102,8 @@ class LinearMode(ModeKernel):
         return 1 + scale * jnp.dot(X * which_dim[None, :], Y.T)
 
     @staticmethod
-    def kernel_only_var_fn(self: 'LinearMode', X, Y, which_dim, which_dim_only):
-        return self.kernel(X, Y, which_dim_only) - 1
+    def kernel_only_var_fn(mode: 'LinearMode', X, Y, which_dim, which_dim_only):
+        return mode.kernel(X, Y, which_dim_only) - 1
         
     def setup(self, X, scales):
         """
@@ -245,25 +245,25 @@ class GaussianMode(ModeKernel):
         return jnp.exp(-((x - y) ** 2) / (2 * self.l**2))
         
     @staticmethod
-    def k(self: 'GaussianMode', X, Y, which_dim):
+    def k(mode: 'GaussianMode', X, Y, which_dim):
         return (
-            self.scale * jnp.prod(1 + which_dim[None, None, :] * self.exps, axis=2)
-            + self.quadratic_part(X, Y, which_dim)
+            mode.scale * jnp.prod(1 + which_dim[None, None, :] * mode.exps, axis=2)
+            + mode.quadratic_part(X, Y, which_dim)
             - 1
         )
     
     @staticmethod
-    def k_only_var(self: 'GaussianMode', X, Y, which_dim, which_dim_only):
+    def k_only_var(mode: 'GaussianMode', X, Y, which_dim, which_dim_only):
         rest = which_dim * (1 - which_dim_only)
         only_part = (
-            jnp.prod(1 + which_dim_only[None, None, :] * self.exps, axis=2) - 1
+            jnp.prod(1 + which_dim_only[None, None, :] * mode.exps, axis=2) - 1
         )
-        rest_part = jnp.prod(1 + rest[None, None, :] * self.exps, axis=2)
+        rest_part = jnp.prod(1 + rest[None, None, :] * mode.exps, axis=2)
         return (
-            self.quadratic_part.individual_influence(
+            mode.quadratic_part.individual_influence(
                 X, Y, which_dim, which_dim_only
             )
-            + self.scale * only_part * rest_part
+            + mode.scale * only_part * rest_part
         )
         
     def setup(self, X, scales):
