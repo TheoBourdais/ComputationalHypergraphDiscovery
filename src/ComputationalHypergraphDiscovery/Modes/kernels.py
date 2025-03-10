@@ -259,7 +259,7 @@ class GaussianMode(ModeKernel):
     @staticmethod
     def k_recompute(mode: "GaussianMode", X, Y, which_dim):
         exps = jax.vmap(
-            jax.vmap(mode.gaussian_exp, in_axes=(0, None)), in_axes=(None, 0)
+            jax.vmap(mode.gaussian_exp, in_axes=(None, 0)), in_axes=(0, None)
         )(X, Y)
         return (
             mode.scale * jnp.prod(1 + which_dim[None, None, :] * exps, axis=2)
@@ -280,7 +280,7 @@ class GaussianMode(ModeKernel):
     @staticmethod
     def k_only_var_recompute(mode: "GaussianMode", X, Y, which_dim, which_dim_only):
         exps = jax.vmap(
-            jax.vmap(mode.gaussian_exp, in_axes=(0, None)), in_axes=(None, 0)
+            jax.vmap(mode.gaussian_exp, in_axes=(None, 0)), in_axes=(0, None)
         )(X, Y)
         rest = which_dim * (1 - which_dim_only)
         only_part = jnp.prod(1 + which_dim_only[None, None, :] * exps, axis=2) - 1
