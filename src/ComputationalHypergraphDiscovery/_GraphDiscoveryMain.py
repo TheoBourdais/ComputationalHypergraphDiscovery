@@ -64,7 +64,7 @@ class GraphDiscovery:
         possible_edges=None,
         verbose=True,
         gamma_min=1e-9,
-        is_interpolatory:bool=None
+        is_interpolatory: bool = None,
     ) -> None:
         """
         Builds GraphDiscovery object.
@@ -961,7 +961,14 @@ class GraphDiscovery:
             mask = kernels == i
             if not np.any(mask):
                 continue
-            K_mat = self.vmaped_kernel[kernel](X_pred_used, self.X, active_modess[mask])
+            if kernel.name == "gaussian":
+                K_mat = jax.vmap(kernel.kernel_recompute, in_axes=(None, None, 0))(
+                    X_pred_used, self.X, active_modess[mask]
+                )
+            else:
+                K_mat = self.vmaped_kernel[kernel](
+                    X_pred_used, self.X, active_modess[mask]
+                )
             pred = np.einsum("nij,nj->in", K_mat, -ybs[mask])
             res = res.at[:, mask].set(pred)
         # transform the result back

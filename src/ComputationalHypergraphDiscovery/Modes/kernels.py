@@ -102,9 +102,9 @@ class LinearMode(ModeKernel):
         return 1 + scale * jnp.dot(X * which_dim[None, :], Y.T)
 
     @staticmethod
-    def kernel_only_var_fn(mode: 'LinearMode', X, Y, which_dim, which_dim_only):
+    def kernel_only_var_fn(mode: "LinearMode", X, Y, which_dim, which_dim_only):
         return mode.kernel(X, Y, which_dim_only) - 1
-        
+
     def setup(self, X, scales):
         """
         Set up the kernel with the given data and scales.
@@ -183,7 +183,7 @@ class QuadraticMode(ModeKernel):
             + 2 * scale * linear_only * linear_rest
             - scale * alpha**2
         )
-         
+
     def setup(self, X, scales):
         """
         Sets up the mode kernel with the given data and scales.
@@ -200,9 +200,13 @@ class QuadraticMode(ModeKernel):
             scales["linear"] = 2.0
         alpha = 0.5 * scales["linear"] / self.scale
 
-        self.kernel = functools.partial(QuadraticMode.vectorized_kernel, self.scale, alpha)
+        self.kernel = functools.partial(
+            QuadraticMode.vectorized_kernel, self.scale, alpha
+        )
 
-        self.kernel_only_var = functools.partial(QuadraticMode.vectorized_kernel_only_var, self.scale, alpha)
+        self.kernel_only_var = functools.partial(
+            QuadraticMode.vectorized_kernel_only_var, self.scale, alpha
+        )
 
     def individual_influence(self, X, Y, which_dim, which_dim_only):
         """
@@ -241,31 +245,51 @@ class GaussianMode(ModeKernel):
         self.quadratic_part = QuadraticMode()
 
     @staticmethod
-    def gaussian_exp(self: 'GaussianMode', x, y):
+    def gaussian_exp(self: "GaussianMode", x, y):
         return jnp.exp(-((x - y) ** 2) / (2 * self.l**2))
-        
+
     @staticmethod
-    def k(mode: 'GaussianMode', X, Y, which_dim):
+    def k(mode: "GaussianMode", X, Y, which_dim):
         return (
             mode.scale * jnp.prod(1 + which_dim[None, None, :] * mode.exps, axis=2)
             + mode.quadratic_part(X, Y, which_dim)
             - 1
         )
-    
+
     @staticmethod
-    def k_only_var(mode: 'GaussianMode', X, Y, which_dim, which_dim_only):
-        rest = which_dim * (1 - which_dim_only)
-        only_part = (
-            jnp.prod(1 + which_dim_only[None, None, :] * mode.exps, axis=2) - 1
+    def k_recompute(mode: "GaussianMode", X, Y, which_dim):
+        exps = jax.vmap(
+            jax.vmap(mode.gaussian_exp, in_axes=(0, None)), in_axes=(None, 0)
+        )(X, Y)
+        return (
+            mode.scale * jnp.prod(1 + which_dim[None, None, :] * exps, axis=2)
+            + mode.quadratic_part(X, Y, which_dim)
+            - 1
         )
+
+    @staticmethod
+    def k_only_var(mode: "GaussianMode", X, Y, which_dim, which_dim_only):
+        rest = which_dim * (1 - which_dim_only)
+        only_part = jnp.prod(1 + which_dim_only[None, None, :] * mode.exps, axis=2) - 1
         rest_part = jnp.prod(1 + rest[None, None, :] * mode.exps, axis=2)
         return (
-            mode.quadratic_part.individual_influence(
-                X, Y, which_dim, which_dim_only
-            )
+            mode.quadratic_part.individual_influence(X, Y, which_dim, which_dim_only)
             + mode.scale * only_part * rest_part
         )
-        
+
+    @staticmethod
+    def k_only_var_recompute(mode: "GaussianMode", X, Y, which_dim, which_dim_only):
+        exps = jax.vmap(
+            jax.vmap(mode.gaussian_exp, in_axes=(0, None)), in_axes=(None, 0)
+        )(X, Y)
+        rest = which_dim * (1 - which_dim_only)
+        only_part = jnp.prod(1 + which_dim_only[None, None, :] * exps, axis=2) - 1
+        rest_part = jnp.prod(1 + rest[None, None, :] * exps, axis=2)
+        return (
+            mode.quadratic_part.individual_influence(X, Y, which_dim, which_dim_only)
+            + mode.scale * only_part * rest_part
+        )
+
     def setup(self, X, scales):
         """
         Setup the Gaussian mode kernel.
@@ -285,8 +309,12 @@ class GaussianMode(ModeKernel):
         )(X, X)
 
         self.kernel = functools.partial(GaussianMode.k, self)
+        self.kernel_recompute = functools.partial(GaussianMode.k_recompute, self)
 
         self.kernel_only_var = functools.partial(GaussianMode.k_only_var, self)
+        self.kernel_only_var_recompute = functools.partial(
+            GaussianMode.k_only_var_recompute, self
+        )
 
     def individual_influence(self, X, Y, which_dim, which_dim_only):
         """
