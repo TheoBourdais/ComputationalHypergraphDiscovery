@@ -8,8 +8,7 @@ from jax import random
 import jax
 from jax.scipy.optimize import minimize
 from tqdm import tqdm
-from . import interpolatory, non_interpolatory
-
+import ComputationalHypergraphDiscovery
 
 from .Modes import ModeContainer, LinearMode, QuadraticMode, GaussianMode
 from .decision import *
@@ -45,6 +44,16 @@ class GraphDiscovery:
         Other methods with _ prefix are used internally.
     """
 
+    # A class-level (static) list of unpicklable attribute names:
+    UNPICKLABLE_ATTRS = [
+        "interpolary_regression_find_gamma",
+        "non_interpolatory_regression_find_gamma",
+        "vmaped_kernel",
+        "ancestor_finding_step_funcs",
+        "remove_ancestors",
+        "remove_ancestors_no_adj",
+    ]
+
     def __init__(
         self,
         X,
@@ -55,6 +64,7 @@ class GraphDiscovery:
         possible_edges=None,
         verbose=True,
         gamma_min=1e-9,
+        is_interpolatory:bool=None
     ) -> None:
         """
         Builds GraphDiscovery object.
@@ -119,7 +129,32 @@ class GraphDiscovery:
         self._kernels = kernels
 
         self.gamma_min = gamma_min
-        self.prepare_functions(is_interpolatory=None)
+        self.is_interpolatory = is_interpolatory
+        self.prepare_functions()
+
+    def __getstate__(self):
+        """
+        Custom method for pickling. Remove unpicklable JAX-jitted functions before pickling.
+        """
+        # 1. Copy this instance's dict.
+        state = self.__dict__.copy()
+
+        # 2. Remove the attributes that hold jitted callables.
+        for attr in self.UNPICKLABLE_ATTRS:
+            if attr in state:
+                del state[attr]
+
+        return state
+
+    def __setstate__(self, state):
+        """
+        Custom method for unpickling. Recreate the jitted functions by calling `prepare_functions`.
+        """
+        # 1. Restore the instance attributes.
+        self.__dict__.update(state)
+
+        # 2. Recreate the jitted functions.
+        self.prepare_functions()
 
     @property
     def kernels(self):
@@ -186,11 +221,11 @@ class GraphDiscovery:
         new_graph.has_clusters = True
         return new_graph
 
-    def prepare_functions(self, is_interpolatory=None):
+    def prepare_functions(self):
         """
         Prepares various functions used in the graph discovery process.
 
-        Args:
+        Note:
             is_interpolatory (bool, optional): Flag indicating whether to force a the interpolatory behavior. Useful when a high number of features make non-interpolatory kernels (like quadratic) actually behave like an interpolatory kernel. Defaults to None.
 
         Returns:
@@ -202,13 +237,13 @@ class GraphDiscovery:
 
         self.interpolary_regression_find_gamma = jax.jit(
             jax.vmap(
-                interpolatory.perform_regression_and_find_gamma,
+                ComputationalHypergraphDiscovery.interpolatory.perform_regression_and_find_gamma,
                 in_axes=(0, 0, 0, 0),
             )
         )
         self.non_interpolatory_regression_find_gamma = jax.jit(
             jax.vmap(
-                non_interpolatory.perform_regression_and_find_gamma,
+                ComputationalHypergraphDiscovery.non_interpolatory.perform_regression_and_find_gamma,
                 in_axes=(0, 0, 0, 0),
             )
         )
@@ -224,7 +259,7 @@ class GraphDiscovery:
                     scales,
                     has_clusters=self.has_clusters,
                     memory_efficient=kernel.memory_efficient_required,
-                    is_interpolatory=is_interpolatory,
+                    is_interpolatory=self.is_interpolatory,
                 )
             )
             for kernel in self.kernels

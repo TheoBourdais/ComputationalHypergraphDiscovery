@@ -31,7 +31,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install build
         # If your dependencies are defined in a requirements.txt within the ./src directory, install them as well
-        pip install -r ./src/requirements.txt
+        pip install -r ./requirements.txt
     - name: Build package
       run: |
         cd ./src
