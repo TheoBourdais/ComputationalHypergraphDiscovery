@@ -976,3 +976,23 @@ class GraphDiscovery:
         res = res * self.std_x[:, indexes] + self.mean_x[:, indexes]
 
         return res
+
+    def show_functional_dependencies(self):
+        for var in self.names:
+            data = self.G.nodes.get(var)
+            active_modes = data.get('active_modes')
+            if active_modes is not None:
+                print(f"{var.strip('$')}")
+                kType = data.get('type')
+                gamma = data.get('gamma')
+                noise = data.get('noise')
+                assert len(active_modes) == len(self.names)
+                first = True
+                for act, dep in zip(active_modes, self.names):
+                    if act != 0.0:
+                        if first:
+                            print(f" = {act} * {dep.strip('$')} {{kernel={kType}, gamma={gamma:.3g}, noise={noise:.3g}}}")
+                            first = False
+                        else:
+                            print(f" + {act} * {dep.strip('$')} {{kernel={kType}, gamma={gamma:.3g}, noise={noise:.3g}}}")
+            
