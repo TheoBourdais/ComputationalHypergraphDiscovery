@@ -103,6 +103,7 @@ class GraphDiscovery:
             self.mean_x = np.zeros((1, X.shape[1]))
             self.std_x = np.ones((1, X.shape[1]))
             self.X = X
+        self.normalize = normalize
         self.print_func = print if verbose else lambda *a, **k: None
         self.names = names
 
@@ -182,7 +183,7 @@ class GraphDiscovery:
         X = df.values
         return GraphDiscovery(X=X, names=df.columns, **kwargs)
 
-    def prepare_new_graph_with_clusters(self, clusters):
+    def prepare_new_graph_with_clusters(self, clusters, kernels=None):
         """
         If you want to use clusters of nodes, you can use this method to create a new GraphDiscovery object with the same parameters as the current one, but with different clusters.
         It will also inherit the graph of the current GraphDiscovery object, but with the edges between clusters removed.
@@ -198,12 +199,13 @@ class GraphDiscovery:
         new_graph = GraphDiscovery(
             X=self.X,
             names=self.names,
-            mode_container=self.modes,
+            kernels=self.kernels if kernels is None else kernels,
+            clusters=clusters,
             possible_edges=self.possible_edges,
             verbose=True,
+            normalize=self.normalize,
         )
         new_graph.print_func = self.print_func
-        new_graph.modes = ModeContainer(self.names, clusters)
         new_graph.G = self.G.copy()
         edges_to_remove = []
         flattened_clusters = [
@@ -218,7 +220,6 @@ class GraphDiscovery:
             for other_node in other_nodes:
                 edges_to_remove.append((node, other_node))
         new_graph.G.remove_edges_from(edges_to_remove)
-        new_graph.has_clusters = True
         return new_graph
 
     def prepare_functions(self):
@@ -980,19 +981,22 @@ class GraphDiscovery:
     def show_functional_dependencies(self):
         for var in self.names:
             data = self.G.nodes.get(var)
-            active_modes = data.get('active_modes')
+            active_modes = data.get("active_modes")
             if active_modes is not None:
                 print(f"{var.strip('$')}")
-                kType = data.get('type')
-                gamma = data.get('gamma')
-                noise = data.get('noise')
+                kType = data.get("type")
+                gamma = data.get("gamma")
+                noise = data.get("noise")
                 assert len(active_modes) == len(self.names)
                 first = True
                 for act, dep in zip(active_modes, self.names):
                     if act != 0.0:
                         if first:
-                            print(f" = {act} * {dep.strip('$')} {{kernel={kType}, gamma={gamma:.3g}, noise={noise:.3g}}}")
+                            print(
+                                f" = {act} * {dep.strip('$')} {{kernel={kType}, gamma={gamma:.3g}, noise={noise:.3g}}}"
+                            )
                             first = False
                         else:
-                            print(f" + {act} * {dep.strip('$')} {{kernel={kType}, gamma={gamma:.3g}, noise={noise:.3g}}}")
-            
+                            print(
+                                f" + {act} * {dep.strip('$')} {{kernel={kType}, gamma={gamma:.3g}, noise={noise:.3g}}}"
+                            )
