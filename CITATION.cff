@@ -1,0 +1,58 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite both the software and the paper as below."
+type: software
+title: "Computational Hypergraph Discovery"
+version: 2.1.0
+abstract: "A Gaussian process framework for connecting the dots - discovering graphical structure and functional relationships within data"
+authors:
+  - family-names: Bourdais
+    given-names: Theo
+    email: tbourdai@caltech.edu
+    affiliation: California Institute of Technology
+  - family-names: Owhadi
+    given-names: Houman
+    email: owhadi@caltech.edu
+    affiliation: California Institute of Technology
+  - family-names: Batlle Franch
+    given-names: Pau
+    email: pbatllef@caltech.edu
+    affiliation: California Institute of Technology
+  - family-names: Baptista
+    given-names: Ricardo
+    email: rsb@caltech.edu
+    affiliation: California Institute of Technology
+  - family-names: Yang
+    given-names: Xianjin
+    email: yxjmath@caltech.edu
+    affiliation: California Institute of Technology
+repository-code: "https://github.com/TheoBourdais/ComputationalHypergraphDiscovery"
+keywords:
+  - Machine Learning
+  - Data Science
+  - Applied Mathematics
+  - Gaussian Processes
+  - Graph Discovery
+  - Hypergraph
+preferred-citation:
+  type: article
+  title: "Codiscovering graphical structure and functional relationships within data: A Gaussian Process framework for connecting the dots"
+  authors:
+    - family-names: Bourdais
+      given-names: Theo
+      affiliation: California Institute of Technology
+    - family-names: Owhadi
+      given-names: Houman
+      affiliation: California Institute of Technology
+    - family-names: Batlle Franch
+      given-names: Pau
+      affiliation: California Institute of Technology
+    - family-names: Baptista
+      given-names: Ricardo
+      affiliation: California Institute of Technology
+    - family-names: Yang
+      given-names: Xianjin
+      affiliation: California Institute of Technology
+  journal: "Proceedings of the National Academy of Sciences"
+  year: 2024
+  doi: 10.1073/pnas.2403449121
+  url: "https://www.pnas.org/doi/10.1073/pnas.2403449121"
